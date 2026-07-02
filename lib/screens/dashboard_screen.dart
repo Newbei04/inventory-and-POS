@@ -24,7 +24,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _db = DatabaseHelper.instance;
 
   int _productCount = 0;
-  double _totalValue = 0;
+  double _totalSales = 0;
   double _totalCost = 0;
   int _totalQty = 0;
   List<Product> _lowStock = [];
@@ -42,7 +42,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _loading = true);
     final results = await Future.wait([
       _db.count(),
-      _db.getInventoryValue(),
+      _db.getTotalSales(),
       _db.getInventoryCost(),
       _db.getTotalQuantity(),
       _db.getLowStockProducts(),
@@ -52,7 +52,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
     setState(() {
       _productCount = results[0] as int;
-      _totalValue = results[1] as double;
+      _totalSales = results[1] as double;
       _totalCost = results[2] as double;
       _totalQty = results[3] as int;
       _lowStock = results[4] as List<Product>;
@@ -137,12 +137,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.account_balance_wallet,
+                child: const Icon(Icons.trending_up,
                     color: Colors.white, size: 20),
               ),
               const SizedBox(width: 10),
               Text(
-                'Total Inventory Value',
+                'Total Sales',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.85),
                   fontSize: 13,
@@ -153,7 +153,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 14),
           Text(
-            '₱${_totalValue.toStringAsFixed(2)}',
+            '₱${_totalSales.toStringAsFixed(2)}',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 34,

@@ -96,7 +96,12 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       body: _ready && _controller != null && _controller!.value.isInitialized
           ? Stack(
               children: [
-                CameraPreview(_controller!),
+                Center(
+                  child: AspectRatio(
+                    aspectRatio: _controller!.value.aspectRatio,
+                    child: CameraPreview(_controller!),
+                  ),
+                ),
                 Center(
                   child: Container(
                     width: 260,

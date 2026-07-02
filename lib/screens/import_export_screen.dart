@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../db/database_helper.dart';
@@ -14,7 +16,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   final _dbHelper = DatabaseHelper.instance;
   bool _loading = false;
 
-  Future<String?> _pickFormat() {
+  Future<String?> _pickFormat({bool showAll = false}) {
     return showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -38,23 +40,22 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
               const Text('Choose export format',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               const SizedBox(height: 16),
-              ListTile(
-                leading:
-                    const Icon(Icons.table_chart_outlined, color: Colors.blue),
-                title: const Text('CSV'),
-                subtitle: const Text('Comma-separated values'),
-                onTap: () => Navigator.pop(context, 'csv'),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              const SizedBox(height: 4),
+              if (!showAll) ...[
+                ListTile(
+                  leading: const Icon(Icons.table_chart_outlined, color: Colors.blue),
+                  title: const Text('CSV'),
+                  subtitle: const Text('Comma-separated values'),
+                  onTap: () => Navigator.pop(context, 'csv'),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                const SizedBox(height: 4),
+              ],
               ListTile(
                 leading: const Icon(Icons.grid_on, color: Colors.green),
                 title: const Text('Excel'),
                 subtitle: const Text('.xlsx format'),
                 onTap: () => Navigator.pop(context, 'xlsx'),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ],
           ),
@@ -63,7 +64,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     );
   }
 
-  Future<void> _export() async {
+  Future<void> _exportProducts() async {
     final format = await _pickFormat();
     if (format == null) return;
     setState(() => _loading = true);
@@ -77,17 +78,11 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
         }
         return;
       }
-      await ExportImportHelper.exportProducts(
+      final path = await ExportImportHelper.exportProducts(
         products: products,
         format: format,
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Exported ${products.length} products as $format'),
-          ),
-        );
-      }
+      if (mounted) _showExportSuccess(path);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -99,6 +94,153 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     }
   }
 
+  Future<void> _exportStockMovements() async {
+    final format = await _pickFormat();
+    if (format == null) return;
+    setState(() => _loading = true);
+    try {
+      final movements = await _dbHelper.getStockMovements();
+      if (movements.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No stock movements to export')),
+          );
+        }
+        return;
+      }
+      final path = await ExportImportHelper.exportStockMovements(
+        movements: movements,
+        format: format,
+      );
+      if (mounted) _showExportSuccess(path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _exportPriceChanges() async {
+    final format = await _pickFormat();
+    if (format == null) return;
+    setState(() => _loading = true);
+    try {
+      final changes = await _dbHelper.getPriceChangeList();
+      if (changes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No price changes to export')),
+          );
+        }
+        return;
+      }
+      final path = await ExportImportHelper.exportPriceChanges(
+        changes: changes,
+        format: format,
+      );
+      if (mounted) _showExportSuccess(path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _exportAll() async {
+    setState(() => _loading = true);
+    try {
+      final results = await Future.wait([
+        _dbHelper.getAllProducts(),
+        _dbHelper.getStockMovements(),
+        _dbHelper.getPriceChangeList(),
+      ]);
+      final products = results[0] as List;
+      final movements = results[1] as List;
+      final changes = results[2] as List;
+
+      final path = await ExportImportHelper.exportCombined(
+        products: products.cast(),
+        movements: movements.cast(),
+        changes: changes.cast(),
+      );
+      if (mounted) _showExportSuccess(path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _showExportSuccess(String filePath) {
+    final fileName = filePath.split(Platform.pathSeparator).last;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 24),
+            SizedBox(width: 8),
+            Text('Export Complete'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('File saved to:'),
+            const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                fileName,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              filePath,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ExportImportHelper.shareFile(
+                filePath,
+                text: 'Exported file',
+              );
+            },
+            icon: const Icon(Icons.share, size: 18),
+            label: const Text('Share'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _import() async {
     setState(() => _loading = true);
     try {
@@ -106,17 +248,57 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
       if (result.products.isEmpty && result.errors.isEmpty) return;
 
       int imported = 0;
+      int updated = 0;
       int skipped = 0;
       for (final product in result.products) {
         try {
-          await _dbHelper.upsertByBarcode(product);
-          imported++;
+          final existing = await _dbHelper.getProductByBarcode(product.barcode);
+          if (existing == null) {
+            final id = await _dbHelper.insertProduct(product);
+            product.id = id;
+            if (product.quantity > 0) {
+              await _dbHelper.logStockChange(
+                productId: id,
+                productName: product.name,
+                oldQuantity: 0,
+                newQuantity: product.quantity,
+                type: 'add',
+              );
+            }
+            imported++;
+          } else {
+            final priceChanged = existing.price != product.price || existing.cost != product.cost;
+            final stockChanged = existing.quantity != product.quantity;
+
+            await _dbHelper.upsertByBarcode(product);
+
+            if (priceChanged) {
+              await _dbHelper.logPriceChange(
+                productId: existing.id!,
+                productName: product.name,
+                oldPrice: existing.price,
+                newPrice: product.price,
+                oldCost: existing.cost,
+                newCost: product.cost,
+              );
+            }
+            if (stockChanged) {
+              await _dbHelper.logStockChange(
+                productId: existing.id!,
+                productName: product.name,
+                oldQuantity: existing.quantity,
+                newQuantity: product.quantity,
+                type: product.quantity > existing.quantity ? 'add' : 'sale',
+              );
+            }
+            updated++;
+          }
         } catch (_) {
           skipped++;
         }
       }
 
-      if (mounted) _showResultDialog(imported, skipped, result.errors);
+      if (mounted) _showResultDialog(imported, updated, skipped, result.errors);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -131,7 +313,20 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   Future<void> _downloadTemplate() async {
     setState(() => _loading = true);
     try {
-      await ExportImportHelper.downloadTemplate();
+      final path = await ExportImportHelper.downloadTemplate();
+      if (mounted) {
+        final fileName = path.split(Platform.pathSeparator).last;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved to: .../$fileName'),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'OK',
+              onPressed: () {},
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -143,7 +338,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     }
   }
 
-  void _showResultDialog(int imported, int skipped, List<String> errors) {
+  void _showResultDialog(int imported, int updated, int skipped, List<String> errors) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -156,9 +351,19 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
               children: [
                 const Icon(Icons.check_circle, color: Colors.green, size: 20),
                 const SizedBox(width: 8),
-                Text('$imported products imported'),
+                Text('$imported products added'),
               ],
             ),
+            if (updated > 0) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.edit, color: Colors.blue, size: 20),
+                  const SizedBox(width: 8),
+                  Text('$updated products updated'),
+                ],
+              ),
+            ],
             if (skipped > 0) ...[
               const SizedBox(height: 8),
               Row(
@@ -217,18 +422,58 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                 _card(
                   icon: Icons.file_download_outlined,
                   title: 'Export',
-                  subtitle: 'Export all products to a single file',
+                  subtitle: 'Choose data to export',
                   cs: cs,
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _export,
-                      icon: const Icon(Icons.file_download),
-                      label: const Text('Export'),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _exportProducts,
+                          icon: const Icon(Icons.inventory_2),
+                          label: const Text('Export Products'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _exportStockMovements,
+                          icon: const Icon(Icons.history),
+                          label: const Text('Export Stock Movements'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _exportPriceChanges,
+                          icon: const Icon(Icons.trending_up),
+                          label: const Text('Export Price Changes'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.tonalIcon(
+                          onPressed: _exportAll,
+                          icon: const Icon(Icons.grid_on),
+                          label: const Text('Export All (Excel - Multi-sheet)'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),

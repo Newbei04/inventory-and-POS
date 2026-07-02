@@ -53,29 +53,31 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
 
   void _onTabTap(int i) {
     if (i == _currentIndex) {
-      _navigatorKeys[i].currentState
-          ?.popUntil((route) => route.isFirst);
+      _navigatorKeys[i].currentState?.popUntil((route) => route.isFirst);
       return;
     }
     _pulseControllers[_currentIndex].reverse();
     setState(() => _currentIndex = i);
     _pulseControllers[i].forward();
-    _navigatorKeys[i].currentState
-        ?.popUntil((route) => route.isFirst);
+    _navigatorKeys[i].currentState?.popUntil((route) => route.isFirst);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final bottomInset = MediaQuery.of(context).padding.bottom + _barHeight + 16;
 
     return Scaffold(
       extendBody: true,
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages.asMap().entries.map((entry) {
-          return _buildTabNavigator(entry.key, entry.value);
-        }).toList(),
+      body: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: IndexedStack(
+          index: _currentIndex,
+          children: _pages.asMap().entries.map((entry) {
+            return _buildTabNavigator(entry.key, entry.value);
+          }).toList(),
+        ),
       ),
       bottomNavigationBar: _FloatingGlassBar(
         currentIndex: _currentIndex,
@@ -103,11 +105,12 @@ const _pillInset = 6.0;
 const _barHPadding = 4.0;
 
 double get _labelHeight {
-  final span = TextSpan(text: 'Hg', style: TextStyle(fontSize: _fontSize));
-  final painter = TextPainter(
-    text: span,
-    textDirection: TextDirection.ltr,
-  )..layout();
+  final span = TextSpan(
+    text: 'Hg',
+    style: TextStyle(fontSize: _fontSize),
+  );
+  final painter = TextPainter(text: span, textDirection: TextDirection.ltr)
+    ..layout();
   return painter.height;
 }
 
@@ -133,8 +136,11 @@ class _FloatingGlassBar extends StatelessWidget {
   static const _items = [
     _BarItemData(Icons.dashboard_outlined, Icons.dashboard_rounded, 'Home'),
     _BarItemData(Icons.inventory_2_outlined, Icons.inventory_2, 'Products'),
-    _BarItemData(Icons.qr_code_scanner_rounded,
-        Icons.qr_code_scanner_rounded, 'Scan'),
+    _BarItemData(
+      Icons.qr_code_scanner_rounded,
+      Icons.qr_code_scanner_rounded,
+      'Scan',
+    ),
     _BarItemData(Icons.history_outlined, Icons.history, 'Logs'),
     _BarItemData(Icons.import_export_outlined, Icons.import_export, 'Import'),
   ];
@@ -163,53 +169,49 @@ class _FloatingGlassBar extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.all(barBR),
           color: colorScheme.surfaceContainerHighest,
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.15),
-          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
         ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final itemWidth = constraints.maxWidth / 5;
-                return Stack(
-                  children: [
-                    AnimatedPositioned(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOutCubic,
-                      left: currentIndex * itemWidth,
-                      width: itemWidth,
-                      top: _pillInset,
-                      bottom: _pillInset,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius:
-                              BorderRadius.circular(pillRadius),
-                          color: colorScheme.primary
-                              .withValues(alpha: 0.12),
-                        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final itemWidth = constraints.maxWidth / 5;
+            return Stack(
+              children: [
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOutCubic,
+                  left: currentIndex * itemWidth,
+                  width: itemWidth,
+                  top: _pillInset,
+                  bottom: _pillInset,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(pillRadius),
+                      color: colorScheme.primary.withValues(alpha: 0.12),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: List.generate(5, (i) {
+                    return Expanded(
+                      child: _BarTab(
+                        isSelected: currentIndex == i,
+                        animation: pulseAnimations[i],
+                        item: _items[i],
+                        colorScheme: colorScheme,
+                        isCenter: i == 2,
+                        onTap: () => onTap(i),
                       ),
-                    ),
-                    Row(
-                      children: List.generate(5, (i) {
-                        return Expanded(
-                          child: _BarTab(
-                            isSelected: currentIndex == i,
-                            animation: pulseAnimations[i],
-                            item: _items[i],
-                            colorScheme: colorScheme,
-                            isCenter: i == 2,
-                            onTap: () => onTap(i),
-                          ),
-                        );
-                      }),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        );
-    }
+                    );
+                  }),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
   }
+}
 
 class _BarItemData {
   final IconData icon;
@@ -261,28 +263,31 @@ class _BarTab extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: isSelected
-                          ? LinearGradient(colors: [
-                              colorScheme.primary,
-                              colorScheme.primary.darken(18),
-                            ])
-                          : LinearGradient(colors: [
-                              colorScheme.surfaceContainerHighest,
-                              colorScheme.surfaceContainerHighest
-                                  .darken(8),
-                            ]),
+                          ? LinearGradient(
+                              colors: [
+                                colorScheme.primary,
+                                colorScheme.primary.darken(18),
+                              ],
+                            )
+                          : LinearGradient(
+                              colors: [
+                                colorScheme.surfaceContainerHighest,
+                                colorScheme.surfaceContainerHighest.darken(8),
+                              ],
+                            ),
                       boxShadow: isSelected
                           ? [
                               BoxShadow(
-                                color: colorScheme.primary
-                                    .withValues(alpha: 0.4),
+                                color: colorScheme.primary.withValues(
+                                  alpha: 0.4,
+                                ),
                                 blurRadius: 10,
                                 offset: const Offset(0, 4),
                               ),
                             ]
                           : [
                               BoxShadow(
-                                color: Colors.black
-                                    .withValues(alpha: 0.08),
+                                color: Colors.black.withValues(alpha: 0.08),
                                 blurRadius: 4,
                                 offset: const Offset(0, 2),
                               ),

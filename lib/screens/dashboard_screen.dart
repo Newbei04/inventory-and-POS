@@ -5,6 +5,10 @@ import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../models/stock_movement.dart';
 import 'add_edit_product_screen.dart';
+import 'inventory_screen.dart';
+import 'price_check_v2_screen.dart';
+import 'receipts_screen.dart';
+import 'reports_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -86,6 +90,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _buildHeroCard(theme),
                   const SizedBox(height: 20),
                   _buildStatsRow(theme),
+                  const SizedBox(height: 20),
+                  _buildActionCards(theme),
                   const SizedBox(height: 24),
                   _buildRecentActivity(theme),
                   const SizedBox(height: 24),
@@ -276,6 +282,127 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionCards(ThemeData theme) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _actionCard(
+                icon: Icons.qr_code_scanner,
+                label: 'Price Check',
+                subtitle: 'Auto-scan & display',
+                color: Colors.indigo,
+                bgColor: Colors.indigo.shade50,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const PriceCheckV2Screen()),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _actionCard(
+                icon: Icons.inventory_2,
+                label: 'Inventory',
+                subtitle: 'Manage stock levels',
+                color: Colors.green,
+                bgColor: Colors.green.shade50,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const InventoryScreen()),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _actionCard(
+                icon: Icons.receipt_long,
+                label: 'Receipts',
+                subtitle: 'View sales history',
+                color: Colors.blue,
+                bgColor: Colors.blue.shade50,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ReceiptsScreen()),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _actionCard(
+                icon: Icons.bar_chart,
+                label: 'Reports',
+                subtitle: 'Sales & inventory',
+                color: Colors.teal,
+                bgColor: Colors.teal.shade50,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ReportsScreen()),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _actionCard({
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required Color color,
+    required Color bgColor,
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey.shade600,
                 ),
               ),
             ],

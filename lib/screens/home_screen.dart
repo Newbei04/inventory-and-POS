@@ -142,10 +142,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _scanBarcode() async {
-    final barcode = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(builder: (context) => const ScanScreen()),
-    );
+    final barcode = await ScanScreen.pickAndScan(context);
     if (barcode == null || !mounted) return;
     final existing = await _dbHelper.getProductByBarcode(barcode);
     if (mounted) {

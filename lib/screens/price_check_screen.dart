@@ -37,6 +37,8 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   void _showScannerSettings() {
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,   // <-- escapes the nested tab Navigator, attaches to MaterialApp's root Navigator
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -126,15 +128,15 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: selected
-                      ? Colors.blue.shade50
-                      : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  icon,
-                  color: selected ? Colors.blue.shade700 : Colors.grey.shade600,
-                  size: 24,
+              color: selected
+                  ? Colors.blue.shade50
+                  : Colors.grey.shade700,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              icon,
+              color: selected ? Colors.blue.shade700 : Colors.white,
+              size: 24,
                 ),
               ),
               const SizedBox(width: 12),
@@ -206,11 +208,9 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   }
 
   Future<void> _scan() async {
-    final barcode = await Navigator.push<String>(
+    final barcode = await ScanScreen.pickAndScan(
       context,
-      MaterialPageRoute(
-        builder: (_) => const ScanScreen(title: 'Scan Price'),
-      ),
+      title: 'Scan Price',
     );
     if (barcode != null && mounted) {
       _searchCtrl.text = barcode;
@@ -473,7 +473,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
             const SizedBox(height: 4),
             Text(
               'Scan using your Bluetooth / USB barcode scanner',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),

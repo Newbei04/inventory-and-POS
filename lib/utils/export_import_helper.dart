@@ -15,6 +15,39 @@ import '../models/price_change.dart';
 class ExportImportHelper {
   ExportImportHelper._();
 
+  static Directory? _exportsDir;
+
+  static Future<Directory> getExportsDir() async {
+    if (_exportsDir != null) return _exportsDir!;
+    final appDir = await getApplicationDocumentsDirectory();
+    _exportsDir = Directory(p.join(appDir.path, 'price_checker_exports'));
+    if (!_exportsDir!.existsSync()) _exportsDir!.createSync(recursive: true);
+    return _exportsDir!;
+  }
+
+  static Future<String> _saveFile(String name, String ext, List<int> bytes) async {
+    final dir = await getExportsDir();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final path = p.join(dir.path, '${name}_$timestamp.$ext');
+    final file = File(path);
+    await file.writeAsBytes(bytes);
+    return path;
+  }
+
+  static Future<String> _saveFileFromString(String name, String ext, String content) async {
+    final dir = await getExportsDir();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final path = p.join(dir.path, '${name}_$timestamp.$ext');
+    final file = File(path);
+    await file.writeAsString(content);
+    return path;
+  }
+
+  /// Open the share sheet for a previously saved file.
+  static Future<void> shareFile(String filePath, {String? text}) async {
+    await Share.shareXFiles([XFile(filePath)], text: text);
+  }
+
   // ── Export ──
 
   static String _imageToBase64(String imagePath) {
@@ -103,46 +136,139 @@ class ExportImportHelper {
       ]);
     }
 
-    final dir = await getTemporaryDirectory();
-    final path = p.join(dir.path, 'products_export.xlsx');
     final bytes = excel.encode();
     if (bytes == null) throw Exception('Failed to encode Excel file');
-    return File(path)..writeAsBytesSync(bytes);
+    final path = await _saveFile('products_export', 'xlsx', bytes);
+    return File(path);
   }
 
-  /// Export all products in the given format and open the share sheet.
-  static Future<void> exportProducts({
+  /// Export all products in the given format and return the file path.
+  static Future<String> exportProducts({
     required List<Product> products,
     required String format,
   }) async {
-    final dir = await getTemporaryDirectory();
-
     switch (format) {
       case 'csv':
         final csv = _toCSV(products);
-        final file = File(p.join(dir.path, 'products_export.csv'));
-        file.writeAsStringSync(csv);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${products.length} products exported as CSV',
-        );
+        return _saveFileFromString('products_export', 'csv', csv);
       case 'json':
         final json = _toJSON(products);
-        final file = File(p.join(dir.path, 'products_export.json'));
-        file.writeAsStringSync(json);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${products.length} products exported as JSON',
-        );
+        return _saveFileFromString('products_export', 'json', json);
       case 'xlsx':
         final file = await _toExcel(products);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${products.length} products exported as Excel',
-        );
+        return file.path;
       default:
         throw ArgumentError('Unsupported format: $format');
     }
+  }
+
+  /// Export all data types into a single Excel file with multiple sheets.
+  static Future<File> _toCombinedExcel({
+    required List<Product> products,
+    required List<StockMovement> movements,
+    required List<PriceChange> changes,
+  }) async {
+    final excel = Excel.createExcel();
+
+    // Sheet 1: Products
+    final productSheet = excel['Products'];
+    productSheet.appendRow([
+      TextCellValue('barcode'),
+      TextCellValue('name'),
+      TextCellValue('category'),
+      TextCellValue('price'),
+      TextCellValue('cost'),
+      TextCellValue('quantity'),
+      TextCellValue('unit'),
+      TextCellValue('description'),
+      TextCellValue('image_data'),
+      TextCellValue('date_added'),
+      TextCellValue('date_updated'),
+    ]);
+    for (final prod in products) {
+      productSheet.appendRow([
+        TextCellValue(prod.barcode),
+        TextCellValue(prod.name),
+        TextCellValue(prod.category),
+        DoubleCellValue(prod.price),
+        DoubleCellValue(prod.cost),
+        IntCellValue(prod.quantity),
+        TextCellValue(prod.unit),
+        TextCellValue(prod.description),
+        TextCellValue(_imageToBase64(prod.imagePath)),
+        TextCellValue(prod.dateAdded),
+        TextCellValue(prod.dateUpdated),
+      ]);
+    }
+
+    // Sheet 2: Stock Movements
+    final stockSheet = excel['Stock Movements'];
+    stockSheet.appendRow([
+      TextCellValue('id'),
+      TextCellValue('product_id'),
+      TextCellValue('product_name'),
+      TextCellValue('old_quantity'),
+      TextCellValue('new_quantity'),
+      TextCellValue('delta'),
+      TextCellValue('type'),
+      TextCellValue('date'),
+    ]);
+    for (final m in movements) {
+      stockSheet.appendRow([
+        IntCellValue(m.id ?? 0),
+        IntCellValue(m.productId),
+        TextCellValue(m.productName),
+        IntCellValue(m.oldQuantity),
+        IntCellValue(m.newQuantity),
+        IntCellValue(m.delta),
+        TextCellValue(m.type),
+        TextCellValue(m.date),
+      ]);
+    }
+
+    // Sheet 3: Price Changes
+    final priceSheet = excel['Price Changes'];
+    priceSheet.appendRow([
+      TextCellValue('id'),
+      TextCellValue('product_id'),
+      TextCellValue('product_name'),
+      TextCellValue('old_price'),
+      TextCellValue('new_price'),
+      TextCellValue('old_cost'),
+      TextCellValue('new_cost'),
+      TextCellValue('date'),
+    ]);
+    for (final c in changes) {
+      priceSheet.appendRow([
+        IntCellValue(c.id ?? 0),
+        IntCellValue(c.productId),
+        TextCellValue(c.productName),
+        DoubleCellValue(c.oldPrice),
+        DoubleCellValue(c.newPrice),
+        DoubleCellValue(c.oldCost),
+        DoubleCellValue(c.newCost),
+        TextCellValue(c.date),
+      ]);
+    }
+
+    final bytes = excel.encode();
+    if (bytes == null) throw Exception('Failed to encode Excel file');
+    final path = await _saveFile('inventory_export', 'xlsx', bytes);
+    return File(path);
+  }
+
+  /// Export all data types into a single Excel file and return the path.
+  static Future<String> exportCombined({
+    required List<Product> products,
+    required List<StockMovement> movements,
+    required List<PriceChange> changes,
+  }) async {
+    final file = await _toCombinedExcel(
+      products: products,
+      movements: movements,
+      changes: changes,
+    );
+    return file.path;
   }
 
   // ── Log Export ──
@@ -225,11 +351,10 @@ class ExportImportHelper {
       ]);
     }
 
-    final dir = await getTemporaryDirectory();
-    final path = p.join(dir.path, 'stock_movements_export.xlsx');
     final bytes = excel.encode();
     if (bytes == null) throw Exception('Failed to encode Excel file');
-    return File(path)..writeAsBytesSync(bytes);
+    final path = await _saveFile('stock_movements_export', 'xlsx', bytes);
+    return File(path);
   }
 
   static Future<File> _priceChangesToExcel(List<PriceChange> changes) async {
@@ -260,74 +385,47 @@ class ExportImportHelper {
       ]);
     }
 
-    final dir = await getTemporaryDirectory();
-    final path = p.join(dir.path, 'price_changes_export.xlsx');
     final bytes = excel.encode();
     if (bytes == null) throw Exception('Failed to encode Excel file');
-    return File(path)..writeAsBytesSync(bytes);
+    final path = await _saveFile('price_changes_export', 'xlsx', bytes);
+    return File(path);
   }
 
-  static Future<void> exportStockMovements({
+  /// Export stock movements and return the file path.
+  static Future<String> exportStockMovements({
     required List<StockMovement> movements,
     required String format,
   }) async {
-    final dir = await getTemporaryDirectory();
     switch (format) {
       case 'csv':
         final csv = _stockMovementsToCSV(movements);
-        final file = File(p.join(dir.path, 'stock_movements_export.csv'));
-        file.writeAsStringSync(csv);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${movements.length} stock movements exported as CSV',
-        );
+        return _saveFileFromString('stock_movements_export', 'csv', csv);
       case 'json':
         final json = _stockMovementsToJSON(movements);
-        final file = File(p.join(dir.path, 'stock_movements_export.json'));
-        file.writeAsStringSync(json);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${movements.length} stock movements exported as JSON',
-        );
+        return _saveFileFromString('stock_movements_export', 'json', json);
       case 'xlsx':
         final file = await _stockMovementsToExcel(movements);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${movements.length} stock movements exported as Excel',
-        );
+        return file.path;
       default:
         throw ArgumentError('Unsupported format: $format');
     }
   }
 
-  static Future<void> exportPriceChanges({
+  /// Export price changes and return the file path.
+  static Future<String> exportPriceChanges({
     required List<PriceChange> changes,
     required String format,
   }) async {
-    final dir = await getTemporaryDirectory();
     switch (format) {
       case 'csv':
         final csv = _priceChangesToCSV(changes);
-        final file = File(p.join(dir.path, 'price_changes_export.csv'));
-        file.writeAsStringSync(csv);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${changes.length} price changes exported as CSV',
-        );
+        return _saveFileFromString('price_changes_export', 'csv', csv);
       case 'json':
         final json = _priceChangesToJSON(changes);
-        final file = File(p.join(dir.path, 'price_changes_export.json'));
-        file.writeAsStringSync(json);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${changes.length} price changes exported as JSON',
-        );
+        return _saveFileFromString('price_changes_export', 'json', json);
       case 'xlsx':
         final file = await _priceChangesToExcel(changes);
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: '${changes.length} price changes exported as Excel',
-        );
+        return file.path;
       default:
         throw ArgumentError('Unsupported format: $format');
     }
@@ -335,9 +433,9 @@ class ExportImportHelper {
 
   // ── Import ──
 
-  /// Generate a template CSV file and share/save it.
-  static Future<void> downloadTemplate() async {
-    final dir = await getTemporaryDirectory();
+  /// Generate a template CSV file and save it to the downloads directory.
+  static Future<String> downloadTemplate() async {
+    final dir = await getApplicationDocumentsDirectory();
     final rows = <List<dynamic>>[
       [
         'barcode', 'name', 'category', 'price', 'cost',
@@ -351,10 +449,7 @@ class ExportImportHelper {
     final csv = const ListToCsvConverter().convert(rows);
     final file = File(p.join(dir.path, 'import_template.csv'));
     file.writeAsStringSync(csv);
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      text: 'Import Template',
-    );
+    return file.path;
   }
 
   static Directory? _imageDir;

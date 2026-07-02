@@ -638,13 +638,9 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.qr_code_scanner),
                   onPressed: () async {
-                    final barcode = await Navigator.push<String>(
+                    final barcode = await ScanScreen.pickAndScan(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => const ScanScreen(
-                          title: 'Scan Barcode',
-                        ),
-                      ),
+                      title: 'Scan Barcode',
                     );
                     if (barcode != null && mounted) {
                       _barcodeCtrl.text = barcode;

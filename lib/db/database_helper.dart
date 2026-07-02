@@ -1,7 +1,9 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../models/price_change.dart';
 import '../../models/product.dart';
+import '../../models/receipt.dart';
 import '../../models/stock_movement.dart';
 
 class DatabaseHelper {
@@ -21,7 +23,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'inventory_scanner.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE products (
@@ -43,6 +45,7 @@ class DatabaseHelper {
         await _createStockMovementsTable(db);
         await _createPriceChangesTable(db);
         await _createSettingsTable(db);
+        await _createReceiptsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -58,6 +61,9 @@ class DatabaseHelper {
         }
         if (oldVersion < 4) {
           await _createSettingsTable(db);
+        }
+        if (oldVersion < 5) {
+          await _createReceiptsTable(db);
         }
       },
     );
@@ -126,6 +132,106 @@ class DatabaseHelper {
 
   Future<void> setPassword(String password) async {
     await setSetting('edit_password', password);
+  }
+
+  // ── Receipts ──
+
+  Future<void> _createReceiptsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        receipt_no TEXT NOT NULL,
+        subtotal REAL NOT NULL,
+        tax REAL NOT NULL,
+        total REAL NOT NULL,
+        cash REAL NOT NULL,
+        change REAL NOT NULL,
+        items_json TEXT NOT NULL,
+        date TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_receipts_date ON receipts(date)',
+    );
+  }
+
+  Future<int> insertReceipt(Receipt receipt) async {
+    final db = await database;
+    return db.insert('receipts', receipt.toMap());
+  }
+
+  Future<List<Receipt>> getAllReceipts({int? limit}) async {
+    final db = await database;
+    final rows = await db.query(
+      'receipts',
+      orderBy: 'date DESC',
+      limit: limit,
+    );
+    return rows.map((r) => Receipt.fromMap(r)).toList();
+  }
+
+  Future<List<Receipt>> getReceiptsInRange(DateTime from, DateTime to) async {
+    final db = await database;
+    final rows = await db.query(
+      'receipts',
+      where: 'date >= ? AND date <= ?',
+      whereArgs: [from.toIso8601String(), to.toIso8601String()],
+      orderBy: 'date DESC',
+    );
+    return rows.map((r) => Receipt.fromMap(r)).toList();
+  }
+
+  // ── Reports ──
+
+  Future<double> getTotalSales({DateTime? from, DateTime? to}) async {
+    final db = await database;
+    String query = 'SELECT COALESCE(SUM(total), 0) AS total FROM receipts';
+    List<dynamic> args = [];
+    if (from != null && to != null) {
+      query += ' WHERE date >= ? AND date <= ?';
+      args = [from.toIso8601String(), to.toIso8601String()];
+    } else if (from != null) {
+      query += ' WHERE date >= ?';
+      args = [from.toIso8601String()];
+    }
+    final result = await db.rawQuery(query, args);
+    return (result.first['total'] as num?)?.toDouble() ?? 0;
+  }
+
+  Future<int> getTransactionCount({DateTime? from, DateTime? to}) async {
+    final db = await database;
+    String query = 'SELECT COUNT(*) AS c FROM receipts';
+    List<dynamic> args = [];
+    if (from != null && to != null) {
+      query += ' WHERE date >= ? AND date <= ?';
+      args = [from.toIso8601String(), to.toIso8601String()];
+    } else if (from != null) {
+      query += ' WHERE date >= ?';
+      args = [from.toIso8601String()];
+    }
+    final result = await db.rawQuery(query, args);
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Aggregate top products from all receipts (in Dart).
+  Future<Map<String, Map<String, dynamic>>> getTopProducts({int limit = 10}) async {
+    final receipts = await getAllReceipts();
+    final aggregated = <String, Map<String, dynamic>>{};
+    for (final r in receipts) {
+      for (final item in r.items) {
+        aggregated.putIfAbsent(item.productName, () => {
+          'product_name': item.productName,
+          'barcode': item.barcode,
+          'total_qty': 0,
+          'total_sales': 0.0,
+        });
+        aggregated[item.productName]!['total_qty'] = (aggregated[item.productName]!['total_qty'] as int) + item.quantity;
+        aggregated[item.productName]!['total_sales'] = (aggregated[item.productName]!['total_sales'] as double) + item.total;
+      }
+    }
+    final sorted = aggregated.values.toList()
+      ..sort((a, b) => (b['total_qty'] as int).compareTo(a['total_qty'] as int));
+    return {for (final e in sorted.take(limit)) e['product_name'] as String: e};
   }
 
   Future<Product?> getProductByBarcode(String barcode) async {
@@ -440,6 +546,11 @@ class DatabaseHelper {
       orderBy: 'date DESC',
       limit: limit,
     );
+  }
+
+  Future<List<PriceChange>> getPriceChangeList({int? limit}) async {
+    final rows = await getPriceChanges(limit: limit);
+    return rows.map((m) => PriceChange.fromMap(m)).toList();
   }
 
   Future<List<Map<String, dynamic>>> getPriceChangesByProduct(

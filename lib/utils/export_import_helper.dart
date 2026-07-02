@@ -19,9 +19,22 @@ class ExportImportHelper {
 
   static Future<Directory> getExportsDir() async {
     if (_exportsDir != null) return _exportsDir!;
-    final appDir = await getApplicationDocumentsDirectory();
-    _exportsDir = Directory(p.join(appDir.path, 'price_checker_exports'));
-    if (!_exportsDir!.existsSync()) _exportsDir!.createSync(recursive: true);
+
+    Directory? dir;
+
+    final downloadsDir = await getDownloadsDirectory();
+    if (downloadsDir != null) {
+      dir = Directory('${downloadsDir.path}/price_checker_exports');
+    } else if (Platform.isAndroid) {
+      dir = Directory('/storage/emulated/0/Download/price_checker_exports');
+    }
+
+    dir ??= Directory(
+      '${(await getApplicationDocumentsDirectory()).path}/price_checker_exports',
+    );
+
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    _exportsDir = dir;
     return _exportsDir!;
   }
 

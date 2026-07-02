@@ -9,7 +9,6 @@ import 'inventory_screen.dart';
 import 'price_check_v2_screen.dart';
 import 'receipts_screen.dart';
 import 'reports_screen.dart';
-import 'sync_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -93,8 +92,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _buildStatsRow(theme),
                   const SizedBox(height: 20),
                   _buildActionCards(theme),
-                  const SizedBox(height: 20),
-                  _buildSyncCard(theme),
                   const SizedBox(height: 24),
                   _buildRecentActivity(theme),
                   const SizedBox(height: 24),
@@ -408,61 +405,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   color: Colors.grey.shade600,
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSyncCard(ThemeData theme) {
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const SyncScreen()),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.cloud_upload,
-                  color: Colors.blue,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Google Sheets Sync',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'One-tap sync all data to a spreadsheet',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: Colors.grey.shade400),
             ],
           ),
         ),

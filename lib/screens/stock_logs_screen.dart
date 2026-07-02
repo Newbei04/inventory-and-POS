@@ -27,18 +27,22 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final results = await Future.wait([
-      _db.getStockMovements(limit: 200),
-      _db.getPriceChanges(limit: 200),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _movements = results[0] as List<StockMovement>;
-      _priceChanges = (results[1] as List<Map<String, dynamic>>)
-          .map((m) => PriceChange.fromMap(m))
-          .toList();
-      _loading = false;
-    });
+    try {
+      final results = await Future.wait([
+        _db.getStockMovements(limit: 200),
+        _db.getPriceChangeList(limit: 200),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _movements = results[0] as List<StockMovement>;
+        _priceChanges = results[1] as List<PriceChange>;
+        _loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   @override

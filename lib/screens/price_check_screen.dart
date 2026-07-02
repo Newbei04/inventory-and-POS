@@ -121,9 +121,14 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   }
 
   Future<void> _scan() async {
-    final barcode = await ScanScreen.pickAndScan(
+    final barcode = await Navigator.push<String>(
       context,
-      title: 'Scan Price',
+      MaterialPageRoute(
+        builder: (_) => const ScanScreen(
+          title: 'Scan Price',
+          initialMode: ScanMode.camera,
+        ),
+      ),
     );
     if (barcode != null && mounted) {
       _suppressOnChanged = true;

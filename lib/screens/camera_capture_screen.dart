@@ -14,6 +14,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
   List<CameraDescription>? _cameras;
   bool _ready = false;
   bool _flashOn = false;
+  bool _capturing = false;
 
   @override
   void initState() {
@@ -49,6 +50,9 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
       }
       final controller = CameraController(cameras[0], ResolutionPreset.medium);
       await controller.initialize();
+      if (_flashOn) {
+        await controller.setFlashMode(FlashMode.torch);
+      }
       if (mounted) {
         setState(() {
           _cameras = cameras;
@@ -62,12 +66,15 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
   }
 
   Future<void> _capture() async {
-    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_controller == null || !_controller!.value.isInitialized || _capturing) return;
+    setState(() => _capturing = true);
     try {
+      await _controller!.setFlashMode(FlashMode.off);
       final file = await _controller!.takePicture();
       if (mounted) Navigator.of(context).pop(file.path);
     } catch (e) {
       if (mounted) {
+        setState(() => _capturing = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Capture error: $e')),
         );
@@ -79,18 +86,25 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     if (_cameras == null || _cameras!.length < 2) return;
     final idx = _cameras!.indexOf(_controller!.description);
     final next = (idx + 1) % _cameras!.length;
+    final newController = CameraController(_cameras![next], ResolutionPreset.medium);
+    await newController.initialize();
+    if (_flashOn) {
+      await newController.setFlashMode(FlashMode.torch);
+    }
     final old = _controller;
-    _controller = CameraController(_cameras![next], ResolutionPreset.medium);
-    await _controller!.initialize();
+    if (mounted) {
+      setState(() {
+        _controller = newController;
+      });
+    }
     await old?.dispose();
-    if (mounted) setState(() {});
   }
 
   Future<void> _toggleFlash() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
     _flashOn = !_flashOn;
     await _controller!.setFlashMode(
-      _flashOn ? FlashMode.always : FlashMode.off,
+      _flashOn ? FlashMode.torch : FlashMode.off,
     );
     if (mounted) setState(() {});
   }
@@ -146,11 +160,29 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
       body: _ready && _controller != null && _controller!.value.isInitialized
           ? Stack(
               children: [
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: _controller!.value.aspectRatio,
-                    child: CameraPreview(_controller!),
-                  ),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final cameraRatio = _controller!.value.aspectRatio;
+                    final availableRatio =
+                        constraints.maxWidth / constraints.maxHeight;
+                    double childWidth, childHeight;
+                    if (cameraRatio > availableRatio) {
+                      childHeight = constraints.maxHeight;
+                      childWidth = childHeight * cameraRatio;
+                    } else {
+                      childWidth = constraints.maxWidth;
+                      childHeight = childWidth / cameraRatio;
+                    }
+                    return ClipRect(
+                      child: Center(
+                        child: SizedBox(
+                          width: childWidth,
+                          height: childHeight,
+                          child: CameraPreview(_controller!),
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 Center(
                   child: Container(
@@ -189,16 +221,29 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
                 ),
               ),
               GestureDetector(
-                onTap: _capture,
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
+                onTap: _capturing ? null : _capture,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 150),
+                  opacity: _capturing ? 0.5 : 1.0,
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _capturing ? Colors.grey.shade300 : Colors.white,
+                    ),
+                    child: _capturing
+                        ? const SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              color: Colors.black54,
+                            ),
+                          )
+                        : const Icon(Icons.camera_alt,
+                            color: Colors.black, size: 32),
                   ),
-                  child: const Icon(Icons.camera_alt,
-                      color: Colors.black, size: 32),
                 ),
               ),
               GestureDetector(

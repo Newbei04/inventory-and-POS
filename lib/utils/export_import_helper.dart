@@ -20,22 +20,43 @@ class ExportImportHelper {
   static Future<Directory> getExportsDir() async {
     if (_exportsDir != null) return _exportsDir!;
 
+    // No directory chosen yet — use a sensible default
     Directory? dir;
-
-    final downloadsDir = await getDownloadsDirectory();
-    if (downloadsDir != null) {
-      dir = Directory('${downloadsDir.path}/price_checker_exports');
-    } else if (Platform.isAndroid) {
-      dir = Directory('/storage/emulated/0/Download/price_checker_exports');
+    if (Platform.isAndroid) {
+      try {
+        dir = Directory('/storage/emulated/0/Download/price_checker');
+        if (!dir.existsSync()) dir.createSync(recursive: true);
+      } catch (_) {
+        dir = null;
+      }
     }
-
+    if (dir == null) {
+      final downloadsDir = await getDownloadsDirectory();
+      if (downloadsDir != null) {
+        dir = Directory('${downloadsDir.path}/price_checker');
+      }
+    }
     dir ??= Directory(
-      '${(await getApplicationDocumentsDirectory()).path}/price_checker_exports',
+      '${(await getApplicationDocumentsDirectory()).path}/price_checker',
     );
-
     if (!dir.existsSync()) dir.createSync(recursive: true);
     _exportsDir = dir;
     return _exportsDir!;
+  }
+
+  static Future<bool> pickExportDir() async {
+    final path = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Select export folder',
+    );
+    if (path == null) return false;
+    final dir = Directory(path);
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    _exportsDir = dir;
+    return true;
+  }
+
+  static String getExportsDirPath() {
+    return _exportsDir?.path ?? '';
   }
 
   static Future<String> _saveFile(String name, String ext, List<int> bytes) async {
@@ -448,7 +469,7 @@ class ExportImportHelper {
 
   /// Generate a template CSV file and save it to the downloads directory.
   static Future<String> downloadTemplate() async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getExportsDir();
     final rows = <List<dynamic>>[
       [
         'barcode', 'name', 'category', 'price', 'cost',

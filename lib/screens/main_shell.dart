@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:price_checker/screens/dashboard_screen.dart';
 import 'package:price_checker/screens/home_screen.dart';
 import 'package:price_checker/screens/import_export_screen.dart';
@@ -62,14 +63,50 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
     _navigatorKeys[i].currentState?.popUntil((route) => route.isFirst);
   }
 
+  void _showExitDialog() {
+    showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Exit App'),
+        content: const Text('Are you sure you want to exit?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Exit'),
+          ),
+        ],
+      ),
+    ).then((result) {
+      if (result == true && mounted) {
+        SystemNavigator.pop();
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom + _barHeight + 16;
 
-    return Scaffold(
-      extendBody: true,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        final currentNav = _navigatorKeys[_currentIndex].currentState;
+        if (currentNav != null && currentNav.canPop()) {
+          currentNav.pop();
+        } else {
+          _showExitDialog();
+        }
+      },
+      child: Scaffold(
+        extendBody: true,
       body: Padding(
         padding: EdgeInsets.only(bottom: bottomInset),
         child: IndexedStack(
@@ -84,6 +121,7 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
         onTap: _onTabTap,
         pulseAnimations: _pulseAnimations,
         colorScheme: cs,
+      ),
       ),
     );
   }

@@ -16,6 +16,12 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   final _dbHelper = DatabaseHelper.instance;
   bool _loading = false;
 
+  @override
+  void initState() {
+    super.initState();
+    ExportImportHelper.getExportsDir();
+  }
+
   Future<String?> _pickFormat({bool showAll = false}) {
     return showModalBottomSheet<String>(
       context: context,
@@ -185,6 +191,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
 
   void _showExportSuccess(String filePath) {
     final fileName = filePath.split(Platform.pathSeparator).last;
+    final dirPath = filePath.substring(0, filePath.length - fileName.length - 1);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -199,8 +206,24 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('File saved to:'),
+            Text(
+              'Saved to:',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
             const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                dirPath,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.blue.shade800),
+              ),
+            ),
+            const SizedBox(height: 8),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(10),
@@ -212,11 +235,6 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                 fileName,
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              filePath,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
             ),
           ],
         ),
@@ -315,11 +333,11 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     try {
       final path = await ExportImportHelper.downloadTemplate();
       if (mounted) {
-        final fileName = path.split(Platform.pathSeparator).last;
+        final dir = ExportImportHelper.getExportsDirPath();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Saved to: .../$fileName'),
-            duration: const Duration(seconds: 4),
+            content: Text('Template saved to $dir'),
+            duration: const Duration(seconds: 6),
             action: SnackBarAction(
               label: 'OK',
               onPressed: () {},
@@ -426,6 +444,43 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                   cs: cs,
                   child: Column(
                     children: [
+                      // Save location
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.folder, size: 20, color: Colors.grey.shade600),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                ExportImportHelper.getExportsDirPath(),
+                                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            TextButton(
+                              onPressed: () async {
+                                final changed = await ExportImportHelper.pickExportDir();
+                                if (changed && mounted) setState(() {});
+                              },
+                              style: TextButton.styleFrom(
+                                minimumSize: Size.zero,
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: Text('Change', style: TextStyle(fontSize: 12, color: Colors.blue.shade700)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(

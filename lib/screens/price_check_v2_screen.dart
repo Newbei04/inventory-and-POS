@@ -29,6 +29,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
   bool _found = false;
   bool _loading = false;
   bool _torchOn = false;
+  String? _lastBarcode;
   bool _extActive = false;
   String _extStatus = 'Enter barcode below';
   BluetoothDevice? _selectedDevice;
@@ -68,6 +69,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       _found = false;
       _product = null;
       _loading = false;
+      _lastBarcode = null;
     });
     if (mode == _ScannerMode.camera) {
       await _scannerController.start();
@@ -90,17 +92,18 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
   }
 
   void _onDetect(BarcodeCapture capture) {
-    if (_found || _loading) return;
+    if (_loading) return;
     final barcodes = capture.barcodes;
     if (barcodes.isEmpty) return;
     final value = barcodes.first.rawValue;
-    if (value == null || value.isEmpty) return;
+    if (value == null || value.isEmpty || value == _lastBarcode) return;
     _lookup(value);
   }
 
   void _onExtBarcode(String value) {
-    if (value.trim().isEmpty || _found || _loading) return;
-    _lookup(value.trim());
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || _loading || trimmed == _lastBarcode) return;
+    _lookup(trimmed);
     _extCtrl.clear();
   }
 
@@ -111,7 +114,9 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       _found = false;
     });
 
-    final product = await _db.getProductByBarcode(barcode.trim());
+    final bc = barcode.trim();
+    _lastBarcode = bc;
+    final product = await _db.getProductByBarcode(bc);
 
     if (!mounted) return;
     setState(() {
@@ -120,25 +125,25 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       _found = true;
     });
 
-    if (product != null) {
-      Future.delayed(const Duration(seconds: 5), () {
-        if (mounted && _found) {
-          setState(() {
-            _found = false;
-            _product = null;
-          });
-          if (_mode == _ScannerMode.external) {
-            _extFocusNode.requestFocus();
-          }
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted && _found && _lastBarcode == bc) {
+        setState(() {
+          _found = false;
+          _product = null;
+          _lastBarcode = null;
+        });
+        if (_mode == _ScannerMode.external) {
+          _extFocusNode.requestFocus();
         }
-      });
-    }
+      }
+    });
   }
 
   void _reset() {
     setState(() {
       _found = false;
       _product = null;
+      _lastBarcode = null;
     });
     if (_mode == _ScannerMode.external) {
       _extFocusNode.requestFocus();

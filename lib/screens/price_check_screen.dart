@@ -1,10 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 
 import '../db/database_helper.dart';
 import '../models/product.dart';
-import 'pos_screen.dart';
+import '../theme/app_theme.dart';
+import '../widgets/empty_state_widget.dart';
 import 'scan_screen.dart';
 
 class PriceCheckScreen extends StatefulWidget {
@@ -19,13 +21,22 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   final _db = DatabaseHelper.instance;
 
   Product? _product;
-  List<Product> _results = [];
+  List<Product> _allProducts = [];
+  List<Product> _filtered = [];
   bool _loading = false;
   String? _error;
   bool _showingList = false;
   bool _externalScanner = false;
+  bool _suppressOnChanged = false;
+  BluetoothDevice? _selectedDevice;
+  List<BluetoothDevice> _pairedDevices = [];
   final _extFocusNode = FocusNode();
- 
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAll();
+  }
 
   @override
   void dispose() {
@@ -34,10 +45,231 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
     super.dispose();
   }
 
+  Future<void> _loadAll() async {
+    final products = await _db.getAllProducts();
+    if (!mounted) return;
+    setState(() {
+      _allProducts = products;
+      _filtered = products;
+    });
+  }
+
+  void _onSearchChanged(String query) {
+    if (_suppressOnChanged) return;
+    if (_product != null) {
+      setState(() {
+        _product = null;
+        _error = null;
+        _showingList = false;
+      });
+    }
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) {
+      setState(() {
+        _filtered = _allProducts;
+        _error = null;
+        _showingList = false;
+      });
+      return;
+    }
+    final filtered = _allProducts.where((p) =>
+        p.name.toLowerCase().contains(q) ||
+        p.barcode.toLowerCase().contains(q) ||
+        p.category.toLowerCase().contains(q));
+    if (!mounted) return;
+    setState(() {
+      _filtered = filtered.toList();
+      _error = null;
+      _showingList = false;
+    });
+  }
+
+  Future<void> _lookup(String query) async {
+    if (query.trim().isEmpty) return;
+
+    // Refresh local cache before lookup to avoid stale data
+    await _loadAll();
+
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _product = null;
+      _error = null;
+      _showingList = false;
+    });
+
+    var product = await _db.getProductByBarcode(query.trim());
+    if (product != null) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _product = product;
+      });
+      return;
+    }
+
+    final results = await _db.getAllProducts(search: query.trim());
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (results.length == 1) {
+        _product = results.first;
+      } else if (results.isNotEmpty) {
+        _filtered = results;
+        _showingList = true;
+      } else {
+        _error = 'No product found for "$query"';
+      }
+    });
+  }
+
+  Future<void> _scan() async {
+    final barcode = await ScanScreen.pickAndScan(
+      context,
+      title: 'Scan Price',
+    );
+    if (barcode != null && mounted) {
+      _suppressOnChanged = true;
+      _searchCtrl.text = barcode;
+      _suppressOnChanged = false;
+      _lookup(barcode);
+    }
+  }
+
+  void _onExtBarcode(String barcode) {
+    if (barcode.trim().isNotEmpty) {
+      _suppressOnChanged = true;
+      _searchCtrl.text = barcode;
+      _suppressOnChanged = false;
+      _lookup(barcode);
+    }
+  }
+
+  Future<void> _loadPairedDevices() async {
+    try {
+      final devices =
+          await FlutterBluetoothSerial.instance.getBondedDevices();
+      if (mounted) {
+        setState(() => _pairedDevices = devices);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _showDevicePicker() async {
+    await _loadPairedDevices();
+    if (!mounted) return;
+    final device = await showModalBottomSheet<BluetoothDevice>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Select Bluetooth Scanner',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${_pairedDevices.length} paired device(s) found',
+                style:
+                    TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 16),
+              if (_pairedDevices.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.bluetooth_disabled,
+                            size: 48, color: Colors.grey.shade400),
+                        const SizedBox(height: 12),
+                        Text('No paired devices',
+                            style:
+                                TextStyle(color: Colors.grey.shade600)),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Pair your scanner in Bluetooth settings',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade500),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                ..._pairedDevices.map(
+                  (d) => ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color:
+                            _selectedDevice?.address == d.address
+                                ? Colors.green.shade50
+                                : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.bluetooth_connected,
+                        color:
+                            _selectedDevice?.address == d.address
+                                ? Colors.green
+                                : Colors.grey.shade600,
+                      ),
+                    ),
+                    title: Text(d.name ?? 'Unknown',
+                        style:
+                            const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(d.address,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade500)),
+                    trailing:
+                        _selectedDevice?.address == d.address
+                            ? const Icon(Icons.check_circle,
+                                color: Colors.green)
+                            : null,
+                    onTap: () => Navigator.pop(ctx, d),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (device != null && mounted) {
+      setState(() => _selectedDevice = device);
+      _extFocusNode.requestFocus();
+    }
+  }
+
   void _showScannerSettings() {
     showModalBottomSheet(
       context: context,
-      useRootNavigator: true,   // <-- escapes the nested tab Navigator, attaches to MaterialApp's root Navigator
+      useRootNavigator: true,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -88,7 +320,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
                   _externalScanner = true;
                   _searchCtrl.clear();
                   _product = null;
-                  _results = [];
+                  _filtered = _allProducts;
                   _error = null;
                   _showingList = false;
                 });
@@ -170,61 +402,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
     );
   }
 
-  Future<void> _lookup(String query) async {
-    if (query.trim().isEmpty) return;
-    setState(() {
-      _loading = true;
-      _product = null;
-      _results = [];
-      _error = null;
-      _showingList = false;
-    });
-
-    // First try exact barcode match
-    var product = await _db.getProductByBarcode(query.trim());
-    if (product != null) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _product = product;
-      });
-      return;
-    }
-
-    // Not a barcode match — search by name/barcode/category
-    final results = await _db.getAllProducts(search: query.trim());
-    if (!mounted) return;
-    setState(() {
-      _loading = false;
-      if (results.length == 1) {
-        _product = results.first;
-      } else if (results.isNotEmpty) {
-        _results = results;
-        _showingList = true;
-      } else {
-        _error = 'No product found for "$query"';
-      }
-    });
-  }
-
-  Future<void> _scan() async {
-    final barcode = await ScanScreen.pickAndScan(
-      context,
-      title: 'Scan Price',
-    );
-    if (barcode != null && mounted) {
-      _searchCtrl.text = barcode;
-      _lookup(barcode);
-    }
-  }
-
-  void _onExtBarcode(String barcode) {
-    if (barcode.trim().isNotEmpty) {
-      _searchCtrl.text = barcode;
-      _lookup(barcode);
-    }
-  }
-
   Widget _buildBarcodeContent() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -249,6 +426,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
                           tooltip: 'Scan barcode',
                         ),
                       ),
+                      onChanged: _onSearchChanged,
                       onSubmitted: (v) {
                         if (v.trim().isNotEmpty) _lookup(v);
                       },
@@ -266,49 +444,10 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
             ),
           ),
         const SizedBox(height: 12),
-        Card(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const PosScreen()),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(Icons.point_of_sale,
-                        color: Colors.green.shade700, size: 28),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Start Selling',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 15)),
-                        Text('Add items to cart and checkout',
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.grey.shade600)),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, color: Colors.grey.shade400),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
         if (_loading)
           const Center(child: CircularProgressIndicator())
+        else if (_product != null)
+          _buildProductCard(Theme.of(context))
         else if (_error != null)
           Center(
             child: Column(
@@ -330,48 +469,137 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
             ),
           )
         else if (_showingList)
-          Card(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Text('${_results.length} product(s) found',
-                      style: Theme.of(context).textTheme.titleSmall
-                          ?.copyWith(color: Colors.grey.shade600)),
+          _buildResultsList()
+        else if (_filtered.isNotEmpty)
+          _buildProductList()
+        else
+          const EmptyStateWidget(
+            icon: Icons.inventory_2_outlined,
+            title: 'No products yet',
+            subtitle: 'Add products from the Products tab',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildResultsList() {
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text('${_filtered.length} product(s) found',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(color: Colors.grey.shade600)),
+          ),
+          ..._filtered.map(
+            (p) => ListTile(
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: p.imagePath.isNotEmpty
+                      ? Image.file(File(p.imagePath),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              const Icon(Icons.inventory_2))
+                      : const Icon(Icons.inventory_2),
                 ),
-                ..._results.map(
-                  (p) => ListTile(
-                    leading: ClipRRect(
+              ),
+              title: Text(p.name, style: AppText.nameSmall),
+              subtitle: Text(
+                  '${AppText.peso}${p.price.toStringAsFixed(2)} • ${p.quantity} ${p.unit}'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => setState(() {
+                _product = p;
+                _showingList = false;
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProductList() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_searchCtrl.text.trim().isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            child: Text(
+              'All Products — tap to check price',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+          ),
+        ..._filtered.map(
+          (p) => Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.grey.shade200),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => setState(() {
+                _product = p;
+              }),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: SizedBox(
-                        width: 40,
-                        height: 40,
+                        width: 48,
+                        height: 48,
                         child: p.imagePath.isNotEmpty
                             ? Image.file(File(p.imagePath),
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) =>
-                                    const Icon(Icons.inventory_2))
-                            : const Icon(Icons.inventory_2),
+                                    _placeholder())
+                            : _placeholder(),
                       ),
                     ),
-                    title: Text(p.name,
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(
-                        '₱${p.price.toStringAsFixed(2)} • ${p.quantity} ${p.unit}'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => setState(() {
-                      _product = p;
-                      _showingList = false;
-                    }),
-                  ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(p.name,
+                              style: AppText.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${AppText.peso}${p.price.toStringAsFixed(2)}  •  ${p.quantity} ${p.unit}',
+                            style: AppText.label,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right, color: Colors.grey.shade400),
+                  ],
                 ),
-              ],
+              ),
             ),
-          )
-        else if (_product != null)
-          _buildProductCard(Theme.of(context)),
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _placeholder() {
+    return Container(
+      color: Colors.grey.shade100,
+      child:
+          Icon(Icons.inventory_2, color: Colors.grey.shade400, size: 24),
     );
   }
 
@@ -439,6 +667,15 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
                   const SizedBox(height: 4),
                   Text(_product!.description),
                 ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => setState(() => _product = null),
+                    icon: const Icon(Icons.arrow_back, size: 18),
+                    label: const Text('Back to list'),
+                  ),
+                ),
               ],
             ),
           ),
@@ -448,6 +685,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   }
 
   Widget _buildExternalScannerUI() {
+    final connected = _selectedDevice != null;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -460,7 +698,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(
-                Icons.keyboard,
+                connected ? Icons.bluetooth_connected : Icons.keyboard,
                 size: 40,
                 color: Colors.green.shade600,
               ),
@@ -476,7 +714,84 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
               style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+            // Device picker / status
+            InkWell(
+              onTap: _showDevicePicker,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: connected
+                      ? Colors.green.shade50
+                      : Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: connected
+                        ? Colors.green.shade200
+                        : Colors.grey.shade200,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      connected
+                          ? Icons.bluetooth_connected
+                          : Icons.bluetooth,
+                      size: 20,
+                      color: connected
+                          ? Colors.green.shade700
+                          : Colors.grey.shade500,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            connected
+                                ? (_selectedDevice!.name ??
+                                    _selectedDevice!.address)
+                                : 'No device selected',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: connected
+                                  ? Colors.green.shade800
+                                  : Colors.grey.shade700,
+                            ),
+                          ),
+                          Text(
+                            connected
+                                ? _selectedDevice!.address
+                                : 'Tap to select a Bluetooth scanner',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: connected
+                                  ? Colors.green.shade600
+                                  : Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (connected)
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () {
+                          setState(() => _selectedDevice = null);
+                        },
+                        tooltip: 'Disconnect',
+                      )
+                    else
+                      Icon(Icons.chevron_right,
+                          size: 20, color: Colors.grey.shade400),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             TextField(
               focusNode: _extFocusNode,
               autofocus: true,
@@ -487,7 +802,10 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
                   icon: const Icon(Icons.camera_alt_outlined),
                   tooltip: 'Switch to camera scanner',
                   onPressed: () {
-                    setState(() => _externalScanner = false);
+                    setState(() {
+                      _externalScanner = false;
+                      _selectedDevice = null;
+                    });
                   },
                 ),
                 filled: true,
@@ -507,8 +825,11 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Point your scanner at a barcode — '
-              'it will appear and search automatically',
+              connected
+                  ? 'Point your scanner at a barcode — '
+                      'it will appear and search automatically'
+                  : 'For USB scanners, just type in the field above. '
+                      'For Bluetooth, select a device.',
               style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               textAlign: TextAlign.center,
             ),
@@ -526,9 +847,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
         centerTitle: true,
         actions: [
           IconButton(
-            icon: Icon(
-              _externalScanner ? Icons.keyboard : Icons.camera_alt,
-            ),
+            icon: const Icon(Icons.tune_rounded),
             tooltip: 'Scanner settings',
             onPressed: _showScannerSettings,
           ),

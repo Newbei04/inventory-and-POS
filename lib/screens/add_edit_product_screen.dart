@@ -144,14 +144,14 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
     if (useCamera) {
       await _capturePhoto();
-      if (_imagePath.isNotEmpty) return;
+      return;
     }
 
     await _pickFromGallery();
   }
 
   Future<void> _capturePhoto() async {
-    final path = await Navigator.of(context).push<String>(
+    final path = await Navigator.of(context, rootNavigator: true).push<String>(
       MaterialPageRoute(
         builder: (_) => const CameraCaptureScreen(),
       ),

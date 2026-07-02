@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../db/database_helper.dart';
+import '../utils/page_transition.dart';
 import '../models/product.dart';
 import '../models/stock_movement.dart';
 import 'add_edit_product_screen.dart';
 import 'inventory_screen.dart';
 import 'price_check_v2_screen.dart';
+import 'pos_screen.dart';
 import 'receipts_screen.dart';
 import 'reports_screen.dart';
-import 'sync_screen.dart';
+
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -93,8 +95,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _buildStatsRow(theme),
                   const SizedBox(height: 20),
                   _buildActionCards(theme),
-                  const SizedBox(height: 20),
-                  _buildSyncCard(theme),
+                  const SizedBox(height: 16),
+                  _buildPosCard(theme),
                   const SizedBox(height: 24),
                   _buildRecentActivity(theme),
                   const SizedBox(height: 24),
@@ -308,8 +310,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 bgColor: Colors.indigo.shade50,
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(
-                      builder: (_) => const PriceCheckV2Screen()),
+                  slideIn(const PriceCheckV2Screen()),
                 ),
               ),
             ),
@@ -323,8 +324,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 bgColor: Colors.green.shade50,
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(
-                      builder: (_) => const InventoryScreen()),
+                  slideIn(const InventoryScreen()),
                 ),
               ),
             ),
@@ -342,8 +342,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 bgColor: Colors.blue.shade50,
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(
-                      builder: (_) => const ReceiptsScreen()),
+                  slideIn(const ReceiptsScreen()),
                 ),
               ),
             ),
@@ -357,8 +356,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 bgColor: Colors.teal.shade50,
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(
-                      builder: (_) => const ReportsScreen()),
+                  slideIn(const ReportsScreen()),
                 ),
               ),
             ),
@@ -415,50 +413,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildSyncCard(ThemeData theme) {
+  Widget _buildPosCard(ThemeData theme) {
     return Card(
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         onTap: () => Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const SyncScreen()),
+          slideIn(const PosScreen()),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+          padding: const EdgeInsets.all(16),
           child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: Colors.green.shade50,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
-                  Icons.cloud_upload,
-                  color: Colors.blue,
-                  size: 24,
-                ),
+                child: Icon(Icons.point_of_sale,
+                    color: Colors.green.shade700, size: 28),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Google Sheets Sync',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'One-tap sync all data to a spreadsheet',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
+                    const Text('Start Selling',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 15)),
+                    Text('Add items to cart and checkout',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade600)),
                   ],
                 ),
               ),

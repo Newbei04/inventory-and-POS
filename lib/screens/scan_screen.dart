@@ -1,5 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -206,6 +207,7 @@ class _ScanScreenState extends State<ScanScreen>
     final value = barcodes.first.rawValue;
     if (value == null || value.isEmpty) return;
     _handled = true;
+    HapticFeedback.lightImpact();
     Navigator.of(context).pop(value);
   }
 

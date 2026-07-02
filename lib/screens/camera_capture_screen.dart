@@ -8,15 +8,36 @@ class CameraCaptureScreen extends StatefulWidget {
   State<CameraCaptureScreen> createState() => _CameraCaptureScreenState();
 }
 
-class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
+class _CameraCaptureScreenState extends State<CameraCaptureScreen>
+    with WidgetsBindingObserver {
   CameraController? _controller;
   List<CameraDescription>? _cameras;
   bool _ready = false;
+  bool _flashOn = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initCamera();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _controller?.dispose();
+      _controller = null;
+      _ready = false;
+    } else if (state == AppLifecycleState.resumed) {
+      _initCamera();
+    }
   }
 
   Future<void> _initCamera() async {
@@ -26,7 +47,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
         if (mounted) Navigator.of(context).pop();
         return;
       }
-      final controller = CameraController(cameras[0], ResolutionPreset.high);
+      final controller = CameraController(cameras[0], ResolutionPreset.medium);
       await controller.initialize();
       if (mounted) {
         setState(() {
@@ -59,7 +80,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     final idx = _cameras!.indexOf(_controller!.description);
     final next = (idx + 1) % _cameras!.length;
     final old = _controller;
-    _controller = CameraController(_cameras![next], ResolutionPreset.high);
+    _controller = CameraController(_cameras![next], ResolutionPreset.medium);
     await _controller!.initialize();
     await old?.dispose();
     if (mounted) setState(() {});
@@ -67,32 +88,61 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
   Future<void> _toggleFlash() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
-    final flash = _controller!.value.flashMode;
+    _flashOn = !_flashOn;
     await _controller!.setFlashMode(
-      flash == FlashMode.off ? FlashMode.torch : FlashMode.off,
+      _flashOn ? FlashMode.always : FlashMode.off,
     );
+    if (mounted) setState(() {});
   }
 
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
+  void _showExitDialog() {
+    showDialog<bool>(
+      context: context,
+      useRootNavigator: false,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Discard photo?'),
+        content: const Text(
+          'Do you want to exit without capturing a photo?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    ).then((result) {
+      if (result == true && mounted) {
+        Navigator.of(context).pop();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _showExitDialog();
+      },
+      child: Scaffold(
         backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('Capture Photo'),
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.pop(context),
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: const Text('Capture Photo'),
+          centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: _showExitDialog,
+          ),
         ),
-      ),
       body: _ready && _controller != null && _controller!.value.isInitialized
           ? Stack(
               children: [
@@ -156,16 +206,22 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: _flashOn
+                        ? Colors.amber.withValues(alpha: 0.3)
+                        : Colors.white.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.flash_on,
-                      color: Colors.white, size: 24),
+                  child: Icon(
+                    _flashOn ? Icons.flash_on : Icons.flash_off,
+                    color: _flashOn ? Colors.amber : Colors.white,
+                    size: 24,
+                  ),
                 ),
               ),
             ],
           ),
         ),
+      ),
       ),
     );
   }

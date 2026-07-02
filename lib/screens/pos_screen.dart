@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../db/database_helper.dart';
@@ -217,9 +218,22 @@ class _PosScreenState extends State<PosScreen> {
           ),
           FilledButton(
             onPressed: () {
+              HapticFeedback.mediumImpact();
               Navigator.pop(ctx);
+              final saved = List<CartItem>.from(_cart);
               setState(() => _cart.clear());
               _focusNode.requestFocus();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('${saved.length} item(s) cleared'),
+                    action: SnackBarAction(
+                      label: 'Undo',
+                      onPressed: () => setState(() => _cart.addAll(saved)),
+                    ),
+                  ),
+                );
+              }
             },
             style: FilledButton.styleFrom(
               backgroundColor: Colors.red,
@@ -395,6 +409,7 @@ class _PosScreenState extends State<PosScreen> {
     await _db.insertReceipt(receipt);
 
     if (!mounted) return;
+    HapticFeedback.heavyImpact();
     _showReceipt(paid, receiptNo);
     setState(() => _cart.clear());
     _focusNode.requestFocus();

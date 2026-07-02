@@ -1,11 +1,9 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../db/database_helper.dart';
 import '../models/product.dart';
-import 'camera_capture_screen.dart';
 import 'pos_screen.dart';
 import 'scan_screen.dart';
 
@@ -27,8 +25,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   bool _showingList = false;
   bool _externalScanner = false;
   final _extFocusNode = FocusNode();
-  bool _photoMode = false;
-  String? _photoPath;
  
 
   @override
@@ -226,66 +222,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
     if (barcode.trim().isNotEmpty) {
       _searchCtrl.text = barcode;
       _lookup(barcode);
-    }
-  }
-
-  Future<void> _pickPhoto() async {
-    final useCamera = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Select photo source'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Camera'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Gallery'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-    if (useCamera == null) return;
-
-    if (useCamera) {
-      await _capturePhoto();
-      if (_photoPath != null) return;
-    }
-
-    await _pickFromGallery();
-  }
-
-  Future<void> _capturePhoto() async {
-    final path = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => const CameraCaptureScreen(),
-      ),
-    );
-    if (path != null && mounted) {
-      setState(() => _photoPath = path);
-    }
-  }
-
-  Future<void> _pickFromGallery() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-      );
-      if (result != null && result.files.single.path != null && mounted) {
-        setState(() => _photoPath = result.files.single.path!);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open gallery: $e')),
-        );
-      }
     }
   }
 
@@ -511,114 +447,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
     );
   }
 
-  Widget _buildPhotoContent() {
-    if (_photoPath == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.image_search,
-                  size: 48, color: Colors.grey),
-            ),
-            const SizedBox(height: 16),
-            const Text('Take a photo to search',
-                style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text('Snap a picture of the product\nthen search by name',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                textAlign: TextAlign.center),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: _pickPhoto,
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('Take Photo'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      children: [
-        Expanded(
-          flex: 3,
-          child: GestureDetector(
-            onTap: _pickPhoto,
-            child: Container(
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                color: Colors.grey.shade100,
-                image: DecorationImage(
-                  image: FileImage(File(_photoPath!)),
-                  fit: BoxFit.contain,
-                ),
-              ),
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.edit, color: Colors.white, size: 14),
-                          SizedBox(width: 4),
-                          Text('Change photo',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: TextField(
-            decoration: InputDecoration(
-              hintText: 'Search product by name...',
-              prefixIcon: const Icon(Icons.search),
-            ),
-            onSubmitted: (v) {
-              if (v.trim().isNotEmpty) {
-                _searchCtrl.text = v;
-                _lookup(v);
-                setState(() {
-                  _photoMode = false;
-                  _photoPath = null;
-                });
-              }
-            },
-            textInputAction: TextInputAction.search,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Snap a photo of the product, then type its name to find it',
-          style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
   Widget _buildExternalScannerUI() {
     return Card(
       child: Padding(
@@ -708,31 +536,8 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(
-                  value: 'barcode',
-                  icon: Icon(Icons.qr_code),
-                  label: Text('Barcode'),
-                ),
-                ButtonSegment(
-                  value: 'photo',
-                  icon: Icon(Icons.image_search),
-                  label: Text('Photo'),
-                ),
-              ],
-              selected: {_photoMode ? 'photo' : 'barcode'},
-              onSelectionChanged: (v) {
-                final photo = v.first == 'photo';
-                setState(() => _photoMode = photo);
-                if (photo) _pickPhoto();
-              },
-            ),
-          ),
           Expanded(
-            child: _photoMode ? _buildPhotoContent() : _buildBarcodeContent(),
+            child: _buildBarcodeContent(),
           ),
         ],
       ),

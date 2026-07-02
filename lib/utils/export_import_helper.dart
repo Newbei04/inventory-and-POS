@@ -17,11 +17,22 @@ class ExportImportHelper {
 
   // ── Export ──
 
+  static String _imageToBase64(String imagePath) {
+    try {
+      final file = File(imagePath);
+      if (file.existsSync()) {
+        return base64Encode(file.readAsBytesSync());
+      }
+    } catch (_) {}
+    return '';
+  }
+
   static String _toCSV(List<Product> products) {
     final rows = <List<dynamic>>[
       [
         'barcode', 'name', 'category', 'price', 'cost',
-        'quantity', 'unit', 'description', 'date_added', 'date_updated',
+        'quantity', 'unit', 'description', 'image_data',
+        'date_added', 'date_updated',
       ],
       for (final prod in products)
         [
@@ -33,6 +44,7 @@ class ExportImportHelper {
           prod.quantity,
           prod.unit,
           prod.description,
+          _imageToBase64(prod.imagePath),
           prod.dateAdded,
           prod.dateUpdated,
         ],
@@ -50,6 +62,7 @@ class ExportImportHelper {
       'quantity': p.quantity,
       'unit': p.unit,
       'description': p.description,
+      'image_data': _imageToBase64(p.imagePath),
       'date_added': p.dateAdded,
       'date_updated': p.dateUpdated,
     }).toList();
@@ -69,6 +82,7 @@ class ExportImportHelper {
       TextCellValue('quantity'),
       TextCellValue('unit'),
       TextCellValue('description'),
+      TextCellValue('image_data'),
       TextCellValue('date_added'),
       TextCellValue('date_updated'),
     ]);
@@ -83,6 +97,7 @@ class ExportImportHelper {
         IntCellValue(prod.quantity),
         TextCellValue(prod.unit),
         TextCellValue(prod.description),
+        TextCellValue(_imageToBase64(prod.imagePath)),
         TextCellValue(prod.dateAdded),
         TextCellValue(prod.dateUpdated),
       ]);
@@ -326,11 +341,11 @@ class ExportImportHelper {
     final rows = <List<dynamic>>[
       [
         'barcode', 'name', 'category', 'price', 'cost',
-        'quantity', 'unit', 'description',
+        'quantity', 'unit', 'description', 'image_data',
       ],
       [
         '123456789', 'Sample Product', 'General', '99.99', '50.00',
-        '100', 'pcs', 'Optional description',
+        '100', 'pcs', 'Optional description', '',
       ],
     ];
     final csv = const ListToCsvConverter().convert(rows);
@@ -340,6 +355,16 @@ class ExportImportHelper {
       [XFile(file.path)],
       text: 'Import Template',
     );
+  }
+
+  static Directory? _imageDir;
+
+  static Future<Directory> _getImageDir() async {
+    if (_imageDir != null) return _imageDir!;
+    final appDir = await getApplicationDocumentsDirectory();
+    _imageDir = Directory(p.join(appDir.path, 'imported_images'));
+    if (!_imageDir!.existsSync()) _imageDir!.createSync(recursive: true);
+    return _imageDir!;
   }
 
   /// Let the user pick a file and return parsed products.
@@ -391,7 +416,8 @@ class ExportImportHelper {
     final rows = <List<dynamic>>[
       [
         'barcode', 'name', 'category', 'price', 'cost',
-        'quantity', 'unit', 'description', 'date_added', 'date_updated',
+        'quantity', 'unit', 'description', 'image_data',
+        'date_added', 'date_updated',
       ],
       for (final e in data)
         [
@@ -403,6 +429,7 @@ class ExportImportHelper {
           _val(e, 'quantity'),
           _val(e, 'unit', 'pc'),
           _val(e, 'description'),
+          _val(e, 'image_data'),
           _val(e, 'date_added', DateTime.now().toIso8601String()),
           _val(e, 'date_updated', DateTime.now().toIso8601String()),
         ],
@@ -438,12 +465,13 @@ class ExportImportHelper {
     return _parseRows(allRows);
   }
 
-  static ImportResult _parseRows(List<List<dynamic>> rows) {
+  static Future<ImportResult> _parseRows(List<List<dynamic>> rows) async {
     final headers =
         rows[0].map((e) => e.toString().trim().toLowerCase()).toList();
     final products = <Product>[];
     final errors = <String>[];
     final now = DateTime.now().toIso8601String();
+    final imageDir = await _getImageDir();
 
     for (var i = 1; i < rows.length; i++) {
       final row = rows[i];
@@ -456,6 +484,11 @@ class ExportImportHelper {
       }
 
       try {
+        final imagePath = _saveImageFromBase64(
+          _str(data, 'image_data', ''),
+          _str(data, 'barcode', 'unknown'),
+          imageDir,
+        );
         final product = Product(
           barcode: _str(data, 'barcode', ''),
           name: _str(data, 'name', ''),
@@ -465,6 +498,7 @@ class ExportImportHelper {
           quantity: _int(data, 'quantity', 0),
           unit: _str(data, 'unit', 'pc'),
           description: _str(data, 'description', ''),
+          imagePath: imagePath,
           dateAdded: _str(data, 'date_added', now),
           dateUpdated: _str(data, 'date_updated', now),
         );
@@ -479,6 +513,21 @@ class ExportImportHelper {
     }
 
     return ImportResult(products: products, errors: errors);
+  }
+
+  /// Decode base64 image data, save to app documents directory.
+  static String _saveImageFromBase64(
+      String base64data, String barcode, Directory imageDir) {
+    if (base64data.isEmpty) return '';
+    try {
+      final bytes = base64Decode(base64data);
+      final file = File(p.join(imageDir.path,
+          'import_${barcode}_${DateTime.now().millisecondsSinceEpoch}.jpg'));
+      file.writeAsBytesSync(bytes);
+      return file.path;
+    } catch (_) {
+      return '';
+    }
   }
 
   static String _str(Map<String, dynamic> data, String key, String fallback) {

@@ -1,7 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 enum ScanMode { camera, photo, external }
@@ -74,13 +73,13 @@ class ScanScreen extends StatefulWidget {
                     color: Colors.green.shade50,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(
-                    Icons.bluetooth_connected,
-                    color: Colors.green.shade700,
+                  child: const Icon(
+                    Icons.keyboard,
+                    color: Colors.green,
                   ),
                 ),
                 title: const Text('External Scanner'),
-                subtitle: const Text('Use a Bluetooth or USB barcode scanner'),
+                subtitle: const Text('Use a USB barcode scanner'),
                 onTap: () => Navigator.pop(ctx, 'external'),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -127,9 +126,6 @@ class _ScanScreenState extends State<ScanScreen>
   final _extCtrl = TextEditingController();
   String _extStatus = 'Ready';
   bool _extActive = false;
-  BluetoothDevice? _selectedDevice;
-  List<BluetoothDevice> _pairedDevices = [];
-  bool _scanningDevices = false;
 
   @override
   void initState() {
@@ -149,15 +145,9 @@ class _ScanScreenState extends State<ScanScreen>
     if (!mounted) return;
     setState(() {
       _extActive = _extFocusNode.hasFocus;
-      if (_selectedDevice != null) {
-        _extStatus = _extFocusNode.hasFocus
-            ? 'Connected — waiting for scanner input...'
-            : 'Connected — tap to activate';
-      } else {
-        _extStatus = _extFocusNode.hasFocus
-            ? 'No device selected — waiting'
-            : 'No device selected';
-      }
+      _extStatus = _extFocusNode.hasFocus
+          ? 'Ready — waiting for scanner input...'
+          : 'Tap to activate';
     });
   }
 
@@ -169,18 +159,10 @@ class _ScanScreenState extends State<ScanScreen>
       case ScanMode.photo:
         await _initPhotoCamera();
       case ScanMode.external:
-        _selectedDevice = null;
-        _extStatus = 'No device selected';
+        _extStatus = 'Ready';
         _extActive = false;
         _extCtrl.clear();
         _extFocusNode.requestFocus();
-        if (mounted) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _scanMode == ScanMode.external) {
-              _showDevicePicker();
-            }
-          });
-        }
     }
   }
 
@@ -276,18 +258,10 @@ class _ScanScreenState extends State<ScanScreen>
       case ScanMode.photo:
         await _initPhotoCamera();
       case ScanMode.external:
-        _selectedDevice = null;
         _extCtrl.clear();
-        _extStatus = 'No device selected';
+        _extStatus = 'Ready';
         _extActive = false;
         _extFocusNode.requestFocus();
-        if (mounted) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _scanMode == ScanMode.external) {
-              _showDevicePicker();
-            }
-          });
-        }
     }
   }
 
@@ -313,165 +287,6 @@ class _ScanScreenState extends State<ScanScreen>
           if (mounted) Navigator.of(context).pop(value.trim());
         });
       }
-    }
-  }
-
-  Future<void> _loadPairedDevices() async {
-    setState(() => _scanningDevices = true);
-    try {
-      final devices = await FlutterBluetoothSerial.instance.getBondedDevices();
-      if (mounted) {
-        setState(() {
-          _pairedDevices = devices;
-          _scanningDevices = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _scanningDevices = false);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not load devices: $e')));
-      }
-    }
-  }
-
-  Future<void> _showDevicePicker() async {
-    await _loadPairedDevices();
-    if (!mounted) return;
-    final device = await showModalBottomSheet<BluetoothDevice>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Select Bluetooth Scanner',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${_pairedDevices.length} paired device(s) found',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 16),
-              if (_pairedDevices.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(
-                          Icons.bluetooth_disabled,
-                          size: 48,
-                          color: Colors.grey.shade400,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'No paired devices',
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Pair your scanner in Bluetooth settings',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ..._pairedDevices.map(
-                  (d) => ListTile(
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: _selectedDevice?.address == d.address
-                            ? Colors.green.shade50
-                            : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        Icons.bluetooth_connected,
-                        color: _selectedDevice?.address == d.address
-                            ? Colors.green
-                            : Colors.grey.shade600,
-                      ),
-                    ),
-                    title: Text(
-                      d.name ?? 'Unknown',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      d.address,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade500,
-                      ),
-                    ),
-                    trailing: _selectedDevice?.address == d.address
-                        ? const Icon(Icons.check_circle, color: Colors.green)
-                        : null,
-                    onTap: () => Navigator.pop(ctx, d),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              if (_pairedDevices.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Center(
-                  child: TextButton.icon(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Open Bluetooth settings to pair a new device',
-                          ),
-                          duration: Duration(seconds: 3),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.add_circle_outline, size: 18),
-                    label: const Text('Pair new device'),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-    if (device != null && mounted) {
-      setState(() {
-        _selectedDevice = device;
-        _extActive = true;
-        _extStatus = 'Connected — waiting for scanner input...';
-      });
-      _extFocusNode.requestFocus();
     }
   }
 
@@ -744,7 +559,7 @@ class _ScanScreenState extends State<ScanScreen>
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Icon(
-                    Icons.bluetooth_connected,
+                    Icons.keyboard,
                     size: 48,
                     color: _extActive ? const Color(0xFF58C4A6) : _textDim,
                   ),
@@ -774,7 +589,7 @@ class _ScanScreenState extends State<ScanScreen>
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Use a Bluetooth or USB barcode scanner paired with your device',
+                  'Use a USB barcode scanner',
                   style: TextStyle(color: _textDim, fontSize: 13),
                   textAlign: TextAlign.center,
                 ),
@@ -809,48 +624,12 @@ class _ScanScreenState extends State<ScanScreen>
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  _selectedDevice != null
-                      ? 'Scanner ready — point at a barcode'
-                      : 'Select a device below, then point your scanner at a barcode',
+                  'Scanner ready — point at a barcode',
                   style: TextStyle(
                     color: _textDim.withValues(alpha: 0.7),
                     fontSize: 11,
                   ),
                   textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _showDevicePicker,
-                    icon: _scanningDevices
-                        ? SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: _textDim,
-                            ),
-                          )
-                        : Icon(
-                            Icons.bluetooth_searching,
-                            color: _textDim,
-                            size: 18,
-                          ),
-                    label: Text(
-                      _selectedDevice != null
-                          ? (_selectedDevice!.name ?? _selectedDevice!.address)
-                          : 'Select Bluetooth Device',
-                      style: TextStyle(color: _textDim, fontSize: 12),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: _textDim.withValues(alpha: 0.3)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
                 ),
               ],
             ),

@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 
 import '../db/database_helper.dart';
 import '../models/product.dart';
@@ -28,8 +27,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   bool _showingList = false;
   bool _externalScanner = false;
   bool _suppressOnChanged = false;
-  BluetoothDevice? _selectedDevice;
-  List<BluetoothDevice> _pairedDevices = [];
   final _extFocusNode = FocusNode();
 
   @override
@@ -145,127 +142,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
     }
   }
 
-  Future<void> _loadPairedDevices() async {
-    try {
-      final devices =
-          await FlutterBluetoothSerial.instance.getBondedDevices();
-      if (mounted) {
-        setState(() => _pairedDevices = devices);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _showDevicePicker() async {
-    await _loadPairedDevices();
-    if (!mounted) return;
-    final device = await showModalBottomSheet<BluetoothDevice>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Select Bluetooth Scanner',
-                style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${_pairedDevices.length} paired device(s) found',
-                style:
-                    TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 16),
-              if (_pairedDevices.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(Icons.bluetooth_disabled,
-                            size: 48, color: Colors.grey.shade400),
-                        const SizedBox(height: 12),
-                        Text('No paired devices',
-                            style:
-                                TextStyle(color: Colors.grey.shade600)),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Pair your scanner in Bluetooth settings',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade500),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ..._pairedDevices.map(
-                  (d) => ListTile(
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color:
-                            _selectedDevice?.address == d.address
-                                ? Colors.green.shade50
-                                : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        Icons.bluetooth_connected,
-                        color:
-                            _selectedDevice?.address == d.address
-                                ? Colors.green
-                                : Colors.grey.shade600,
-                      ),
-                    ),
-                    title: Text(d.name ?? 'Unknown',
-                        style:
-                            const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(d.address,
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade500)),
-                    trailing:
-                        _selectedDevice?.address == d.address
-                            ? const Icon(Icons.check_circle,
-                                color: Colors.green)
-                            : null,
-                    onTap: () => Navigator.pop(ctx, d),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (device != null && mounted) {
-      setState(() => _selectedDevice = device);
-      _extFocusNode.requestFocus();
-    }
-  }
-
   void _showScannerSettings() {
     showModalBottomSheet(
       context: context,
@@ -313,7 +189,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
               icon: Icons.keyboard,
               title: 'External Scanner',
               subtitle:
-                  'Use a Bluetooth or USB barcode scanner (keyboard wedge)',
+                  'Use a USB barcode scanner (keyboard wedge)',
               selected: _externalScanner,
               onTap: () {
                 setState(() {
@@ -685,7 +561,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   }
 
   Widget _buildExternalScannerUI() {
-    final connected = _selectedDevice != null;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -697,10 +572,10 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
                 color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Icon(
-                connected ? Icons.bluetooth_connected : Icons.keyboard,
+              child: const Icon(
+                Icons.keyboard,
                 size: 40,
-                color: Colors.green.shade600,
+                color: Colors.green,
               ),
             ),
             const SizedBox(height: 16),
@@ -710,86 +585,9 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Scan using your Bluetooth / USB barcode scanner',
+              'Scan using a USB barcode scanner',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            // Device picker / status
-            InkWell(
-              onTap: _showDevicePicker,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: connected
-                      ? Colors.green.shade50
-                      : Colors.grey.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: connected
-                        ? Colors.green.shade200
-                        : Colors.grey.shade200,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      connected
-                          ? Icons.bluetooth_connected
-                          : Icons.bluetooth,
-                      size: 20,
-                      color: connected
-                          ? Colors.green.shade700
-                          : Colors.grey.shade500,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            connected
-                                ? (_selectedDevice!.name ??
-                                    _selectedDevice!.address)
-                                : 'No device selected',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: connected
-                                  ? Colors.green.shade800
-                                  : Colors.grey.shade700,
-                            ),
-                          ),
-                          Text(
-                            connected
-                                ? _selectedDevice!.address
-                                : 'Tap to select a Bluetooth scanner',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: connected
-                                  ? Colors.green.shade600
-                                  : Colors.grey.shade500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (connected)
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () {
-                          setState(() => _selectedDevice = null);
-                        },
-                        tooltip: 'Disconnect',
-                      )
-                    else
-                      Icon(Icons.chevron_right,
-                          size: 20, color: Colors.grey.shade400),
-                  ],
-                ),
-              ),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -804,7 +602,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
                   onPressed: () {
                     setState(() {
                       _externalScanner = false;
-                      _selectedDevice = null;
                     });
                   },
                 ),
@@ -825,11 +622,8 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              connected
-                  ? 'Point your scanner at a barcode — '
-                      'it will appear and search automatically'
-                  : 'For USB scanners, just type in the field above. '
-                      'For Bluetooth, select a device.',
+              'Point your scanner at a barcode — '
+                  'it will appear and search automatically',
               style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               textAlign: TextAlign.center,
             ),

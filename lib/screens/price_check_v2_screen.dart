@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../db/database_helper.dart';
@@ -32,8 +31,6 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
   String? _lastBarcode;
   bool _extActive = false;
   String _extStatus = 'Enter barcode below';
-  BluetoothDevice? _selectedDevice;
-  List<BluetoothDevice> _pairedDevices = [];
 
   @override
   void initState() {
@@ -55,9 +52,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
     setState(() {
       _extActive = _extFocusNode.hasFocus;
       _extStatus = _extFocusNode.hasFocus
-          ? (_selectedDevice != null
-              ? 'Connected — point scanner at a barcode'
-              : 'Type or scan a barcode')
+          ? 'Type or scan a barcode'
           : 'Tap to activate input';
     });
   }
@@ -150,120 +145,6 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
     }
   }
 
-  // ── Bluetooth ──
-
-  Future<void> _loadPairedDevices() async {
-    try {
-      final devices = await FlutterBluetoothSerial.instance.getBondedDevices();
-      if (mounted) {
-        setState(() => _pairedDevices = devices);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _showDevicePicker() async {
-    await _loadPairedDevices();
-    if (!mounted) return;
-    final device = await showModalBottomSheet<BluetoothDevice>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Select Bluetooth Scanner',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${_pairedDevices.length} paired device(s) found',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 16),
-              if (_pairedDevices.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(Icons.bluetooth_disabled,
-                            size: 48, color: Colors.grey.shade400),
-                        const SizedBox(height: 12),
-                        Text('No paired devices',
-                            style: TextStyle(color: Colors.grey.shade600)),
-                        const SizedBox(height: 4),
-                        Text('Pair your scanner in Bluetooth settings',
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.grey.shade500)),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ..._pairedDevices.map(
-                  (d) => ListTile(
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: _selectedDevice?.address == d.address
-                            ? Colors.green.shade50
-                            : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        Icons.bluetooth_connected,
-                        color: _selectedDevice?.address == d.address
-                            ? Colors.green
-                            : Colors.grey.shade600,
-                      ),
-                    ),
-                    title: Text(d.name ?? 'Unknown',
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(d.address,
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade500)),
-                    trailing: _selectedDevice?.address == d.address
-                        ? const Icon(Icons.check_circle, color: Colors.green)
-                        : null,
-                    onTap: () => Navigator.pop(ctx, d),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (device != null && mounted) {
-      setState(() {
-        _selectedDevice = device;
-        _extActive = true;
-        _extStatus = 'Connected — point scanner at a barcode';
-      });
-      _extFocusNode.requestFocus();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -307,7 +188,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
                 value: _ScannerMode.external,
                 child: Row(
                   children: [
-                    Icon(Icons.bluetooth_connected,
+                    Icon(Icons.keyboard,
                         color: _mode == _ScannerMode.external
                             ? Colors.blue
                             : null,
@@ -428,44 +309,21 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
-                  _selectedDevice != null
-                      ? Icons.bluetooth_connected
-                      : Icons.keyboard,
+                  Icons.keyboard,
                   color: _extActive ? Colors.green : Colors.grey.shade600,
                   size: 24,
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _extStatus,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w500,
-                        fontSize: 13,
-                        color: _extActive ? Colors.green.shade700 : Colors.grey.shade600,
-                      ),
-                    ),
-                    if (_selectedDevice != null)
-                      Text(
-                        _selectedDevice!.name ?? _selectedDevice!.address,
-                        style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade500),
-                      ),
-                  ],
+                child: Text(
+                  _extStatus,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 13,
+                    color: _extActive ? Colors.green.shade700 : Colors.grey.shade600,
+                  ),
                 ),
-              ),
-              TextButton.icon(
-                onPressed: _showDevicePicker,
-                icon: Icon(Icons.bluetooth_searching,
-                    size: 16, color: Colors.grey.shade600),
-                label: Text('Device',
-                    style: TextStyle(
-                        fontSize: 12, color: Colors.grey.shade600)),
-                style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8)),
               ),
             ],
           ),

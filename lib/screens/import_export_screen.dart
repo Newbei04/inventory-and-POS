@@ -15,6 +15,7 @@ class ImportExportScreen extends StatefulWidget {
 class _ImportExportScreenState extends State<ImportExportScreen> {
   final _dbHelper = DatabaseHelper.instance;
   bool _loading = false;
+  bool _templateLoading = false;
 
   @override
   void initState() {
@@ -43,16 +44,23 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              const Text('Choose export format',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              const Text(
+                'Choose export format',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 16),
               if (!showAll) ...[
                 ListTile(
-                  leading: const Icon(Icons.table_chart_outlined, color: Colors.blue),
+                  leading: const Icon(
+                    Icons.table_chart_outlined,
+                    color: Colors.blue,
+                  ),
                   title: const Text('CSV'),
                   subtitle: const Text('Comma-separated values'),
                   onTap: () => Navigator.pop(context, 'csv'),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 const SizedBox(height: 4),
               ],
@@ -61,7 +69,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                 title: const Text('Excel'),
                 subtitle: const Text('.xlsx format'),
                 onTap: () => Navigator.pop(context, 'xlsx'),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ],
           ),
@@ -91,9 +101,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
       if (mounted) _showExportSuccess(path);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -121,9 +131,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
       if (mounted) _showExportSuccess(path);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -151,9 +161,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
       if (mounted) _showExportSuccess(path);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -180,9 +190,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
       if (mounted) _showExportSuccess(path);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -191,7 +201,10 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
 
   void _showExportSuccess(String filePath) {
     final fileName = filePath.split(Platform.pathSeparator).last;
-    final dirPath = filePath.substring(0, filePath.length - fileName.length - 1);
+    final dirPath = filePath.substring(
+      0,
+      filePath.length - fileName.length - 1,
+    );
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -220,7 +233,11 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
               ),
               child: Text(
                 dirPath,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.blue.shade800),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.blue.shade800,
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -233,7 +250,10 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
               ),
               child: Text(
                 fileName,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ],
@@ -246,10 +266,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           FilledButton.icon(
             onPressed: () {
               Navigator.pop(ctx);
-              ExportImportHelper.shareFile(
-                filePath,
-                text: 'Exported file',
-              );
+              ExportImportHelper.shareFile(filePath, text: 'Exported file');
             },
             icon: const Icon(Icons.share, size: 18),
             label: const Text('Share'),
@@ -268,6 +285,8 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
       int imported = 0;
       int updated = 0;
       int skipped = 0;
+      final importErrors = <String>[];
+
       for (final product in result.products) {
         try {
           final existing = await _dbHelper.getProductByBarcode(product.barcode);
@@ -285,43 +304,29 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
             }
             imported++;
           } else {
-            final priceChanged = existing.price != product.price || existing.cost != product.cost;
-            final stockChanged = existing.quantity != product.quantity;
-
+            // upsertByBarcode already logs the stock movement / price change
+            // entries internally when quantity or price/cost differ, so we
+            // don't log them again here — doing so would double every entry.
             await _dbHelper.upsertByBarcode(product);
-
-            if (priceChanged) {
-              await _dbHelper.logPriceChange(
-                productId: existing.id!,
-                productName: product.name,
-                oldPrice: existing.price,
-                newPrice: product.price,
-                oldCost: existing.cost,
-                newCost: product.cost,
-              );
-            }
-            if (stockChanged) {
-              await _dbHelper.logStockChange(
-                productId: existing.id!,
-                productName: product.name,
-                oldQuantity: existing.quantity,
-                newQuantity: product.quantity,
-                type: product.quantity > existing.quantity ? 'add' : 'sale',
-              );
-            }
             updated++;
           }
-        } catch (_) {
+        } catch (e) {
           skipped++;
+          importErrors.add('${product.name} (${product.barcode}): $e');
         }
       }
 
-      if (mounted) _showResultDialog(imported, updated, skipped, result.errors);
+      if (mounted) {
+        _showResultDialog(imported, updated, skipped, [
+          ...result.errors,
+          ...importErrors,
+        ]);
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Import failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Import failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -329,34 +334,27 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   }
 
   Future<void> _downloadTemplate() async {
-    setState(() => _loading = true);
+    setState(() => _templateLoading = true);
     try {
-      await ExportImportHelper.downloadTemplate();
-      if (mounted) {
-        final dir = ExportImportHelper.getExportsDirPath();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Template saved to $dir'),
-            duration: const Duration(seconds: 6),
-            action: SnackBarAction(
-              label: 'OK',
-              onPressed: () {},
-            ),
-          ),
-        );
-      }
+      final path = await ExportImportHelper.downloadTemplate();
+      if (mounted) _showExportSuccess(path);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to save template: $e')));
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _templateLoading = false);
     }
   }
 
-  void _showResultDialog(int imported, int updated, int skipped, List<String> errors) {
+  void _showResultDialog(
+    int imported,
+    int updated,
+    int skipped,
+    List<String> errors,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -386,8 +384,11 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const Icon(Icons.warning_amber,
-                      color: Colors.orange, size: 20),
+                  const Icon(
+                    Icons.warning_amber,
+                    color: Colors.orange,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Text('$skipped skipped due to errors'),
                 ],
@@ -395,8 +396,10 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
             ],
             if (errors.isNotEmpty) ...[
               const SizedBox(height: 12),
-              const Text('Warnings:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text(
+                'Warnings:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 4),
               SizedBox(
                 height: 160,
@@ -405,9 +408,13 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                   itemCount: errors.length,
                   itemBuilder: (_, i) => Padding(
                     padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(errors[i],
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.orange)),
+                    child: Text(
+                      errors[i],
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -428,10 +435,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Import / Export'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Import / Export'), centerTitle: true),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -455,27 +459,43 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.folder, size: 20, color: Colors.grey.shade600),
+                            Icon(
+                              Icons.folder,
+                              size: 20,
+                              color: Colors.grey.shade600,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 ExportImportHelper.getExportsDirPath(),
-                                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade600,
+                                ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             const SizedBox(width: 4),
                             TextButton(
                               onPressed: () async {
-                                final changed = await ExportImportHelper.pickExportDir();
+                                final changed =
+                                    await ExportImportHelper.pickExportDir();
                                 if (changed && mounted) setState(() {});
                               },
                               style: TextButton.styleFrom(
                                 minimumSize: Size.zero,
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
-                              child: Text('Change', style: TextStyle(fontSize: 12, color: Colors.blue.shade700)),
+                              child: Text(
+                                'Change',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue.shade700,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -558,8 +578,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                           icon: const Icon(Icons.download),
                           label: const Text('Download Template'),
                           style: OutlinedButton.styleFrom(
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 14),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                         ),
                       ),
@@ -588,20 +607,23 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
               children: [
                 Icon(icon, size: 28, color: cs.primary),
                 const SizedBox(width: 10),
-                Text(title,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold)),
+                Text(
+                  title,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
               ],
             ),
             const SizedBox(height: 6),
             Padding(
               padding: const EdgeInsets.only(left: 38),
-              child: Text(subtitle,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey.shade600,
-                      )),
+              child: Text(
+                subtitle,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+              ),
             ),
             const SizedBox(height: 20),
             child,

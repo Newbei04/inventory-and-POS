@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -30,13 +29,14 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   late final TextEditingController _priceCtrl;
   late final TextEditingController _costCtrl;
   late final TextEditingController _quantityCtrl;
-  late final TextEditingController _unitCtrl;
   late final TextEditingController _descriptionCtrl;
 
   String _imagePath = '';
   bool _saving = false;
   String _selectedCategory = 'General';
   List<String> _categories = [];
+  String _selectedUnit = 'pcs';
+  List<String> _units = [];
 
   bool get _isEdit => widget.existing != null;
 
@@ -57,10 +57,12 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     _quantityCtrl = TextEditingController(
       text: p == null ? '0' : p.quantity.toString(),
     );
-    _unitCtrl = TextEditingController(text: p?.unit ?? 'pcs');
+    _selectedUnit = p?.unit ?? 'pcs';
+    _units = [_selectedUnit];
     _descriptionCtrl = TextEditingController(text: p?.description ?? '');
     _imagePath = p?.imagePath ?? '';
     _loadCategories();
+    _loadUnits();
   }
 
   Future<void> _loadCategories() async {
@@ -72,6 +74,14 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     }
   }
 
+  Future<void> _loadUnits() async {
+    final units = await DatabaseHelper.instance.getUnits();
+    final merged = [_selectedUnit, ...units.where((u) => u != _selectedUnit)];
+    if (mounted) {
+      setState(() => _units = merged);
+    }
+  }
+
   @override
   void dispose() {
     _barcodeCtrl.dispose();
@@ -79,7 +89,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     _priceCtrl.dispose();
     _costCtrl.dispose();
     _quantityCtrl.dispose();
-    _unitCtrl.dispose();
     _descriptionCtrl.dispose();
     super.dispose();
   }
@@ -117,6 +126,43 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
       setState(() {
         _categories.add(name);
         _selectedCategory = name;
+      });
+    }
+  }
+
+  Future<void> _addNewUnit() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('New Unit'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Unit name',
+            prefixIcon: Icon(Icons.straighten),
+          ),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (v) => Navigator.pop(context, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (name != null && name.isNotEmpty && mounted) {
+      setState(() {
+        _units.add(name);
+        _selectedUnit = name;
       });
     }
   }
@@ -202,147 +248,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     }
   }
 
-  Future<bool> _authenticate() async {
-    final db = DatabaseHelper.instance;
-    final hasPassword = await db.isPasswordSet();
-
-    if (!hasPassword) {
-      if (!mounted) return false;
-      final pinCtrl = TextEditingController();
-      final setupPin = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20)),
-          title: const Row(
-            children: [
-              Icon(Icons.pin_outlined, size: 22),
-              SizedBox(width: 8),
-              Text('Set Edit PIN', style: TextStyle(fontSize: 17)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Create a 4-6 digit PIN to protect product edits.',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: pinCtrl,
-                obscureText: true,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'New PIN',
-                  prefixIcon: Icon(Icons.pin_outlined),
-                  counterText: '',
-                ),
-                textInputAction: TextInputAction.done,
-                onSubmitted: (v) =>
-                    Navigator.pop(context, v.trim()),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Skip'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(context, pinCtrl.text.trim()),
-              child: const Text('Set PIN'),
-            ),
-          ],
-        ),
-      );
-      if (setupPin == null || setupPin.length < 4 || setupPin.length > 6) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Valid PIN (4-6 digits) required')),
-          );
-        }
-        return false;
-      }
-      await db.setPassword(setupPin);
-      return true;
-    }
-
-    for (var attempts = 0; attempts < 3; attempts++) {
-      if (!mounted) return false;
-      final pinCtrl = TextEditingController();
-      final input = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20)),
-          title: const Row(
-            children: [
-              Icon(Icons.pin_outlined, size: 22),
-              SizedBox(width: 8),
-              Text('Enter PIN', style: TextStyle(fontSize: 17)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '${3 - attempts} attempt(s) remaining',
-                style: TextStyle(fontSize: 13, color: Colors.red.shade600),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: pinCtrl,
-                obscureText: true,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'PIN',
-                  prefixIcon: Icon(Icons.pin_outlined),
-                  counterText: '',
-                ),
-                textInputAction: TextInputAction.done,
-                onSubmitted: (v) =>
-                    Navigator.pop(context, v.trim()),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(context, pinCtrl.text.trim()),
-              child: const Text('Unlock'),
-            ),
-          ],
-        ),
-      );
-      if (input == null) return false;
-      if (await db.verifyPassword(input)) return true;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Incorrect PIN')),
-        );
-      }
-    }
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Too many failed attempts')),
-      );
-    }
-    return false;
-  }
-
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
@@ -359,7 +264,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
       price: newPrice,
       cost: newCost,
       quantity: newQty,
-      unit: _unitCtrl.text.trim().isEmpty ? 'pcs' : _unitCtrl.text.trim(),
+      unit: _selectedUnit.isEmpty ? 'pcs' : _selectedUnit,
       description: _descriptionCtrl.text.trim(),
       imagePath: _imagePath,
       dateAdded: widget.existing?.dateAdded ?? DateTime.now().toIso8601String(),
@@ -367,8 +272,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     );
 
     try {
-      if (_isEdit && !await _authenticate()) return;
-
       final db = DatabaseHelper.instance;
       final existing = await db.getProductByBarcode(product.barcode);
       if (existing != null && existing.id != widget.existing?.id) {
@@ -774,38 +677,58 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _quantityCtrl,
-                    decoration: InputDecoration(
-                      labelText: _isEdit ? 'Current stock' : 'Quantity',
-                      prefixIcon: Icon(Icons.numbers, size: 20),
-                      hintText: _isEdit ? 'Use + button in product list to adjust' : null,
-                    ),
-                    keyboardType: TextInputType.number,
-                    readOnly: _isEdit,
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Required';
-                      final val = int.tryParse(v.trim());
-                      if (val == null) return 'Invalid number';
-                      if (val < 0) return 'Cannot be negative';
-                      return null;
-                    },
-                  ),
+            TextFormField(
+              controller: _quantityCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Quantity',
+                prefixIcon: Icon(Icons.numbers, size: 20),
+              ),
+              keyboardType: TextInputType.number,
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Required';
+                final val = int.tryParse(v.trim());
+                if (val == null) return 'Invalid number';
+                if (val < 0) return 'Cannot be negative';
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              value: _selectedUnit,
+              decoration: const InputDecoration(
+                labelText: 'Unit',
+                prefixIcon: Icon(Icons.straighten, size: 20),
+              ),
+              items: [
+                ...{_selectedUnit, ..._units}.map(
+                  (u) => DropdownMenuItem(value: u, child: Text(u)),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    controller: _unitCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Unit',
-                      prefixIcon: Icon(Icons.straighten, size: 20),
-                    ),
+                const DropdownMenuItem(
+                  enabled: false,
+                  child: Divider(height: 1),
+                ),
+                const DropdownMenuItem(
+                  value: '__add_new__',
+                  child: Row(
+                    children: [
+                      Icon(Icons.add_circle_outline, size: 20),
+                      SizedBox(width: 8),
+                      Text('Add new unit...'),
+                    ],
                   ),
                 ),
               ],
+              onChanged: (v) async {
+                if (v == '__add_new__') {
+                  await _addNewUnit();
+                  return;
+                }
+                if (v != null) {
+                  setState(() => _selectedUnit = v);
+                }
+              },
+              validator: (v) =>
+                  v == null || v.isEmpty ? 'Unit required' : null,
             ),
             const SizedBox(height: 16),
             TextFormField(

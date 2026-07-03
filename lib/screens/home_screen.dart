@@ -109,42 +109,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _addStock(Product product) async {
-    final ctrl = TextEditingController();
-    final qty = await showDialog<int>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Add stock — ${product.name}'),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Quantity to add',
-            prefixIcon: Icon(Icons.add_box_outlined),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final val = int.tryParse(ctrl.text.trim());
-              if (val != null && val > 0) Navigator.pop(context, val);
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-    if (qty == null || !mounted) return;
-    await _dbHelper.adjustStock(product.id!, qty);
-    _loadProducts();
-  }
-
   void _addProduct() async {
     final created = await Navigator.push<Product>(
       context,
@@ -256,8 +220,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: isFiltered
                         ? 'Try a different search or filter'
                         : 'Tap + to add your first product',
-                    actionLabel: isFiltered ? null : 'Add Product',
-                    onAction: isFiltered ? null : _addProduct,
                   );
                 }
 
@@ -429,21 +391,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      iconSize: 18,
-                      icon: Icon(Icons.add_circle, color: Colors.green.shade600),
-                      tooltip: 'Add stock',
-                      onPressed: () => _addStock(product),
-                    ),
-                  ),
                 ],
               ),
             ],
@@ -535,15 +482,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: isLowStock ? Colors.red.shade600 : Colors.grey.shade600,
                       fontWeight: isLowStock ? FontWeight.w600 : FontWeight.normal,
                     ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                    iconSize: 18,
-                    icon: Icon(Icons.add_circle, color: Colors.green.shade600),
-                    tooltip: 'Add stock',
-                    onPressed: () => _addStock(product),
                   ),
                 ],
               ),
@@ -666,7 +604,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const Divider(height: 1),
             const SizedBox(height: 12),
-            // Action row 1: Edit + Add Stock
+            // Action row: Edit + Delete
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
@@ -681,24 +619,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(context, 'stock'),
-                      icon: const Icon(Icons.add_circle, size: 18),
-                      label: const Text('Add Stock'),
+                      onPressed: () => Navigator.pop(context, 'delete'),
+                      icon: Icon(Icons.delete_outline, size: 18, color: Colors.red.shade400),
+                      label: Text('Delete', style: TextStyle(color: Colors.red.shade400)),
                     ),
                   ),
                 ],
-              ),
-            ),
-            // Action row 2: Delete
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: TextButton.icon(
-                  onPressed: () => Navigator.pop(context, 'delete'),
-                  icon: Icon(Icons.delete_outline, size: 18, color: Colors.red.shade400),
-                  label: Text('Delete Product', style: TextStyle(color: Colors.red.shade400)),
-                ),
               ),
             ),
           ],
@@ -710,8 +636,6 @@ class _HomeScreenState extends State<HomeScreen> {
     switch (action) {
       case 'edit':
         _editProduct(product);
-      case 'stock':
-        _addStock(product);
       case 'delete':
         _deleteProduct(product);
     }

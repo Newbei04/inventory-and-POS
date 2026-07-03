@@ -451,6 +451,19 @@ class DatabaseHelper {
     return rows.map((e) => e['category'].toString()).toList();
   }
 
+  Future<List<String>> getUnits() async {
+    final db = await database;
+
+    final rows = await db.rawQuery('''
+    SELECT DISTINCT unit
+    FROM products
+    WHERE unit <> '' AND unit IS NOT NULL
+    ORDER BY unit
+  ''');
+
+    return rows.map((e) => e['unit'].toString()).toList();
+  }
+
   Future<List<Product>> getByCategory(String category) async {
     final db = await database;
 

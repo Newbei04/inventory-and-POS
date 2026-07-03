@@ -360,9 +360,9 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                   ),
                 ),
               ),
-              const Divider(height: 16),
-              _receiptRow('Subtotal', r.subtotal),
-              _receiptRow('Tax (12%)', r.tax),
+              const Divider(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -374,12 +374,12 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                     '₱${r.total.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                      fontSize: 18,
                     ),
                   ),
                 ],
               ),
-              const Divider(height: 16),
+              const SizedBox(height: 6),
               _receiptRow('Cash', r.cash),
               _receiptRow(
                 'Change',
@@ -391,9 +391,13 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                DateFormat('MMM d, yyyy - h:mm a')
+                DateFormat('MMM d, yyyy  h:mm a')
                     .format(DateTime.parse(r.date)),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey.shade400,
+                  fontFamily: 'monospace',
+                ),
               ),
               const SizedBox(height: 16),
               SizedBox(

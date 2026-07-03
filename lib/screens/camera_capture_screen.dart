@@ -45,7 +45,12 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        if (mounted) Navigator.of(context).pop();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No camera available')),
+          );
+          Navigator.of(context).pop();
+        }
         return;
       }
       final controller = CameraController(cameras[0], ResolutionPreset.medium);
@@ -61,7 +66,12 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
         });
       }
     } catch (e) {
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Camera error: $e')),
+        );
+        Navigator.of(context).pop();
+      }
     }
   }
 
@@ -69,9 +79,14 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     if (_controller == null || !_controller!.value.isInitialized || _capturing) return;
     setState(() => _capturing = true);
     try {
-      await _controller!.setFlashMode(FlashMode.off);
+      if (_flashOn) {
+        await _controller!.setFlashMode(FlashMode.always);
+      }
       final file = await _controller!.takePicture();
-      if (mounted) Navigator.of(context).pop(file.path);
+      if (mounted) {
+        setState(() => _capturing = false);
+        Navigator.of(context).pop(file.path);
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _capturing = false);
@@ -86,27 +101,44 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     if (_cameras == null || _cameras!.length < 2) return;
     final idx = _cameras!.indexOf(_controller!.description);
     final next = (idx + 1) % _cameras!.length;
-    final newController = CameraController(_cameras![next], ResolutionPreset.medium);
-    await newController.initialize();
-    if (_flashOn) {
-      await newController.setFlashMode(FlashMode.torch);
+    try {
+      final newController = CameraController(_cameras![next], ResolutionPreset.medium);
+      await newController.initialize();
+      if (_flashOn) {
+        await newController.setFlashMode(FlashMode.torch);
+      }
+      final old = _controller;
+      if (mounted) {
+        setState(() {
+          _controller = newController;
+        });
+      }
+      await old?.dispose();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Switch camera error: $e')),
+        );
+      }
     }
-    final old = _controller;
-    if (mounted) {
-      setState(() {
-        _controller = newController;
-      });
-    }
-    await old?.dispose();
   }
 
   Future<void> _toggleFlash() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
-    _flashOn = !_flashOn;
-    await _controller!.setFlashMode(
-      _flashOn ? FlashMode.torch : FlashMode.off,
-    );
-    if (mounted) setState(() {});
+    final newMode = !_flashOn;
+    try {
+      await _controller!.setFlashMode(
+        newMode ? FlashMode.torch : FlashMode.off,
+      );
+      _flashOn = newMode;
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Flash error: $e')),
+        );
+      }
+    }
   }
 
   void _showExitDialog() {
@@ -160,29 +192,18 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
       body: _ready && _controller != null && _controller!.value.isInitialized
           ? Stack(
               children: [
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final cameraRatio = _controller!.value.aspectRatio;
-                    final availableRatio =
-                        constraints.maxWidth / constraints.maxHeight;
-                    double childWidth, childHeight;
-                    if (cameraRatio > availableRatio) {
-                      childHeight = constraints.maxHeight;
-                      childWidth = childHeight * cameraRatio;
-                    } else {
-                      childWidth = constraints.maxWidth;
-                      childHeight = childWidth / cameraRatio;
-                    }
-                    return ClipRect(
-                      child: Center(
-                        child: SizedBox(
-                          width: childWidth,
-                          height: childHeight,
-                          child: CameraPreview(_controller!),
-                        ),
+                ClipRect(
+                  child: OverflowBox(
+                    alignment: Alignment.center,
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        width: _controller!.value.previewSize!.height,
+                        height: _controller!.value.previewSize!.width,
+                        child: CameraPreview(_controller!),
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
                 Center(
                   child: Container(

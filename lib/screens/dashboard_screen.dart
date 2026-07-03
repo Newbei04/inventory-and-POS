@@ -31,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<String> _categories = [];
   List<StockMovement> _recentMovements = [];
   bool _loading = true;
+  bool _loadInProgress = false;
 
   @override
   void initState() {
@@ -39,27 +40,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _load() async {
+    // Prevent overlapping loads racing each other (refresh button + pull-to-refresh).
+    if (_loadInProgress) return;
+    _loadInProgress = true;
     setState(() => _loading = true);
-    final results = await Future.wait([
-      _db.count(),
-      _db.getTotalSales(),
-      _db.getInventoryCost(),
-      _db.getTotalQuantity(),
-      _db.getLowStockProducts(),
-      _db.getCategories(),
-      _db.getStockMovements(limit: 8),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _productCount = results[0] as int;
-      _totalSales = results[1] as double;
-      _totalCost = results[2] as double;
-      _totalQty = results[3] as int;
-      _lowStock = results[4] as List<Product>;
-      _categories = results[5] as List<String>;
-      _recentMovements = results[6] as List<StockMovement>;
-      _loading = false;
-    });
+    try {
+      final results = await Future.wait([
+        _db.count(),
+        _db.getTotalSales(),
+        _db.getInventoryCost(),
+        _db.getTotalQuantity(),
+        _db.getLowStockProducts(),
+        _db.getCategories(),
+        _db.getStockMovements(limit: 8),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _productCount = results[0] as int;
+        _totalSales = results[1] as double;
+        _totalCost = results[2] as double;
+        _totalQty = results[3] as int;
+        _lowStock = results[4] as List<Product>;
+        _categories = results[5] as List<String>;
+        _recentMovements = results[6] as List<StockMovement>;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Couldn\'t load dashboard: $e'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.red.shade600,
+        ),
+      );
+    } finally {
+      _loadInProgress = false;
+    }
   }
 
   String get _greeting {
@@ -88,21 +106,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
-                children: [
-                  _buildHeroCard(theme),
-                  const SizedBox(height: 20),
-                  _buildStatsRow(theme),
-                  const SizedBox(height: 20),
-                  _buildActionCards(theme),
-                  const SizedBox(height: 16),
-                  _buildPosCard(theme),
-                  const SizedBox(height: 24),
-                  _buildRecentActivity(theme),
-                  const SizedBox(height: 24),
-                  if (_lowStock.isNotEmpty) _buildLowStockSection(theme),
-                ],
-              ),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+          children: [
+            _buildHeroCard(theme),
+            const SizedBox(height: 20),
+            _buildStatsRow(theme),
+            const SizedBox(height: 20),
+            _buildActionCards(theme),
+            const SizedBox(height: 16),
+            _buildPosCard(theme),
+            const SizedBox(height: 24),
+            _buildRecentActivity(theme),
+            const SizedBox(height: 24),
+            if (_lowStock.isNotEmpty) _buildLowStockSection(theme),
+          ],
+        ),
       ),
     );
   }
@@ -549,8 +567,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         isAdd
                             ? '+${m.delta} added'
                             : isSale
-                                ? '${m.delta} sold'
-                                : '${m.delta} adjusted',
+                            ? '${m.delta} sold'
+                            : '${m.delta} adjusted',
                         style: TextStyle(
                           color: dotColor,
                           fontSize: 12,
@@ -620,11 +638,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         const SizedBox(height: 12),
         ..._lowStock.map(
-          (p) => Card(
+              (p) => Card(
             margin: const EdgeInsets.only(bottom: 8),
             child: ListTile(
               contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -670,9 +688,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 onPressed: () async {
                   await Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => AddEditProductScreen(existing: p),
-                    ),
+                    slideIn(AddEditProductScreen(existing: p)),
                   );
                   _load();
                 },

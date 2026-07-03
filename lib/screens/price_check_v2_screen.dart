@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../db/database_helper.dart';
 import '../models/product.dart';
+import '../utils/usb_scanner_service.dart';
 
 enum _ScannerMode { camera, external }
 
@@ -19,8 +22,6 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
     facing: CameraFacing.back,
     torchEnabled: false,
   );
-  final _extCtrl = TextEditingController();
-  final _extFocusNode = FocusNode();
   final _db = DatabaseHelper.instance;
 
   _ScannerMode _mode = _ScannerMode.camera;
@@ -29,32 +30,23 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
   bool _loading = false;
   bool _torchOn = false;
   String? _lastBarcode;
-  bool _extActive = false;
-  String _extStatus = 'Enter barcode below';
+  final _scanner = UsbScannerService();
+  StreamSubscription<String>? _scannerSub;
+  bool _scannerConnected = false;
+  String _scannerStatus = 'Disconnected';
 
   @override
   void initState() {
     super.initState();
     _scannerController.start();
-    _extFocusNode.addListener(_onExtFocusChange);
   }
 
   @override
   void dispose() {
+    _scannerSub?.cancel();
+    _scanner.dispose();
     _scannerController.dispose();
-    _extCtrl.dispose();
-    _extFocusNode.dispose();
     super.dispose();
-  }
-
-  void _onExtFocusChange() {
-    if (!mounted) return;
-    setState(() {
-      _extActive = _extFocusNode.hasFocus;
-      _extStatus = _extFocusNode.hasFocus
-          ? 'Type or scan a barcode'
-          : 'Tap to activate input';
-    });
   }
 
   Future<void> _setMode(_ScannerMode mode) async {
@@ -67,12 +59,12 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       _lastBarcode = null;
     });
     if (mode == _ScannerMode.camera) {
+      _scannerSub?.cancel();
+      _scanner.disconnect();
       await _scannerController.start();
-      _extFocusNode.unfocus();
     } else {
       await _scannerController.stop();
-      _extCtrl.clear();
-      _extFocusNode.requestFocus();
+      _startScanner();
     }
   }
 
@@ -95,11 +87,30 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
     _lookup(value);
   }
 
-  void _onExtBarcode(String value) {
+  void _onScannerBarcode(String value) {
     final trimmed = value.trim();
     if (trimmed.isEmpty || _loading || trimmed == _lastBarcode) return;
     _lookup(trimmed);
-    _extCtrl.clear();
+  }
+
+  void _startScanner() {
+    _scanner.connect();
+    _scannerSub?.cancel();
+    _scannerSub = _scanner.barcodeStream.listen((barcode) {
+      if (mounted) {
+        setState(() {
+          _scannerConnected = _scanner.isConnected;
+          _scannerStatus = _scanner.status;
+        });
+        _onScannerBarcode(barcode);
+      }
+    });
+    if (mounted) {
+      setState(() {
+        _scannerConnected = _scanner.isConnected;
+        _scannerStatus = _scanner.status;
+      });
+    }
   }
 
   Future<void> _lookup(String barcode) async {
@@ -107,6 +118,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       _loading = true;
       _product = null;
       _found = false;
+      _scannerStatus = 'Looking up barcode...';
     });
 
     final bc = barcode.trim();
@@ -118,6 +130,9 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       _loading = false;
       _product = product;
       _found = true;
+      _scannerStatus = product != null
+          ? 'Found: ${product.name}'
+          : 'No match for that barcode';
     });
 
     Future.delayed(const Duration(seconds: 5), () {
@@ -126,10 +141,10 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
           _found = false;
           _product = null;
           _lastBarcode = null;
+          _scannerStatus = _scannerConnected
+              ? 'Scan a barcode'
+              : 'Disconnected';
         });
-        if (_mode == _ScannerMode.external) {
-          _extFocusNode.requestFocus();
-        }
       }
     });
   }
@@ -139,10 +154,10 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       _found = false;
       _product = null;
       _lastBarcode = null;
+      _scannerStatus = _scannerConnected
+          ? 'Scan a barcode'
+          : 'Disconnected';
     });
-    if (_mode == _ScannerMode.external) {
-      _extFocusNode.requestFocus();
-    }
   }
 
   @override
@@ -151,7 +166,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       appBar: AppBar(
         title: Text(_mode == _ScannerMode.camera
             ? 'Price Check'
-            : 'Price Check — External'),
+            :             'Price Check — USB Scanner'),
         centerTitle: true,
         actions: [
           if (_mode == _ScannerMode.camera) ...[
@@ -188,13 +203,13 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
                 value: _ScannerMode.external,
                 child: Row(
                   children: [
-                    Icon(Icons.keyboard,
+                    Icon(Icons.usb,
                         color: _mode == _ScannerMode.external
                             ? Colors.blue
                             : null,
                         size: 20),
                     const SizedBox(width: 12),
-                    const Text('External Scanner'),
+                    const Text('USB Scanner'),
                   ],
                 ),
               ),
@@ -212,8 +227,8 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
             child: _found && _product != null
                 ? _buildProductDisplay(_product!)
                 : _found && _product == null
-                    ? _buildNotFound()
-                    : _buildIdle(),
+                ? _buildNotFound()
+                : _buildIdle(),
           ),
         ],
       ),
@@ -235,8 +250,8 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
                 color: _found
                     ? Colors.green
                     : _loading
-                        ? Colors.amber
-                        : Colors.white38,
+                    ? Colors.amber
+                    : Colors.white38,
                 width: 3,
               ),
             ),
@@ -256,8 +271,8 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
               ),
               child: _loading
                   ? const Center(
-                      child: CircularProgressIndicator(color: Colors.amber),
-                    )
+                child: CircularProgressIndicator(color: Colors.amber),
+              )
                   : null,
             ),
           ),
@@ -269,7 +284,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
               child: Center(
                 child: Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.black54,
                     borderRadius: BorderRadius.circular(20),
@@ -287,6 +302,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
   }
 
   Widget _buildExternalSection() {
+    final connected = _scannerConnected;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -303,60 +319,91 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: _extActive
+                  color: _loading
+                      ? Colors.amber.shade50
+                      : _found
+                      ? (_product != null
+                      ? Colors.green.shade50
+                      : Colors.orange.shade50)
+                      : connected
                       ? Colors.green.shade50
                       : Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                  Icons.keyboard,
-                  color: _extActive ? Colors.green : Colors.grey.shade600,
+                child: _loading
+                    ? SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.amber.shade700,
+                  ),
+                )
+                    : Icon(
+                  _found
+                      ? (_product != null
+                      ? Icons.check_circle
+                      : Icons.error_outline)
+                      : (connected ? Icons.usb : Icons.usb_off),
+                  color: _found
+                      ? (_product != null
+                      ? Colors.green
+                      : Colors.orange)
+                      : (connected ? Colors.green : Colors.grey.shade600),
                   size: 24,
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  _extStatus,
+                  _scannerStatus,
                   style: TextStyle(
                     fontWeight: FontWeight.w500,
                     fontSize: 13,
-                    color: _extActive ? Colors.green.shade700 : Colors.grey.shade600,
+                    color: _loading
+                        ? Colors.amber.shade800
+                        : _found
+                        ? (_product != null
+                        ? Colors.green.shade700
+                        : Colors.orange.shade700)
+                        : connected
+                        ? Colors.green.shade700
+                        : Colors.grey.shade600,
                   ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _extCtrl,
-            focusNode: _extFocusNode,
-            autofocus: true,
-            style: const TextStyle(fontSize: 18),
-            decoration: InputDecoration(
-              hintText: 'Scan or type barcode...',
-              prefixIcon: const Icon(Icons.qr_code),
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
+          if (!connected)
+            FilledButton.icon(
+              onPressed: _startScanner,
+              icon: const Icon(Icons.usb, size: 18),
+              label: const Text('Connect USB Scanner'),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                    color: Colors.blue.shade400, width: 2),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle, size: 16, color: Colors.green),
+                  SizedBox(width: 6),
+                  Text(
+                    'Scanner ready — scan a barcode',
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
-              suffixIcon: _extCtrl.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.send, size: 18),
-                      onPressed: () => _onExtBarcode(_extCtrl.text),
-                    )
-                  : null,
             ),
-            onSubmitted: _onExtBarcode,
-            textInputAction: TextInputAction.done,
-          ),
         ],
       ),
     );
@@ -514,7 +561,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
   Widget _buildIdle() {
     final icon = _mode == _ScannerMode.camera
         ? Icons.qr_code_scanner
-        : Icons.keyboard;
+        : Icons.usb;
     final msg = _mode == _ScannerMode.camera
         ? 'Point the camera at a product barcode\nto see the price'
         : 'Type or scan a barcode using an\nexternal scanner to see the price';

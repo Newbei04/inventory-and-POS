@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+
+import '../utils/usb_scanner_service.dart';
 
 enum ScanMode { camera, photo, external }
 
@@ -74,11 +78,11 @@ class ScanScreen extends StatefulWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(
-                    Icons.keyboard,
+                    Icons.usb,
                     color: Colors.green,
                   ),
                 ),
-                title: const Text('External Scanner'),
+                title: const Text('USB Scanner'),
                 subtitle: const Text('Use a USB barcode scanner'),
                 onTap: () => Navigator.pop(ctx, 'external'),
                 shape: RoundedRectangleBorder(
@@ -122,10 +126,10 @@ class _ScanScreenState extends State<ScanScreen>
   bool _handled = false;
   late AnimationController _animCtrl;
   late ScanMode _scanMode;
-  final _extFocusNode = FocusNode();
-  final _extCtrl = TextEditingController();
-  String _extStatus = 'Ready';
-  bool _extActive = false;
+  final _scanner = UsbScannerService();
+  StreamSubscription<String>? _scannerSub;
+  String _scannerStatus = 'Ready';
+  bool _scannerConnected = false;
 
   @override
   void initState() {
@@ -135,20 +139,26 @@ class _ScanScreenState extends State<ScanScreen>
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
-    _extFocusNode.addListener(_onExtFocusChange);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _startMode(_scanMode);
     });
   }
 
-  void _onExtFocusChange() {
+  void _onScannerBarcode(String barcode) {
     if (!mounted) return;
-    setState(() {
-      _extActive = _extFocusNode.hasFocus;
-      _extStatus = _extFocusNode.hasFocus
-          ? 'Ready — waiting for scanner input...'
-          : 'Tap to activate';
+    setState(() => _scannerStatus = 'Scanned!');
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) Navigator.of(context).pop(barcode);
     });
+  }
+
+  void _onScannerStatusChanged() {
+    if (mounted) {
+      setState(() {
+        _scannerConnected = _scanner.isConnected;
+        _scannerStatus = _scanner.status;
+      });
+    }
   }
 
   Future<void> _startMode(ScanMode mode) async {
@@ -159,10 +169,12 @@ class _ScanScreenState extends State<ScanScreen>
       case ScanMode.photo:
         await _initPhotoCamera();
       case ScanMode.external:
-        _extStatus = 'Ready';
-        _extActive = false;
-        _extCtrl.clear();
-        _extFocusNode.requestFocus();
+        _scannerStatus = 'Connecting...';
+        _scannerConnected = false;
+        await _scanner.connect();
+        _onScannerStatusChanged();
+        _scannerSub?.cancel();
+        _scannerSub = _scanner.barcodeStream.listen(_onScannerBarcode);
     }
   }
 
@@ -258,10 +270,12 @@ class _ScanScreenState extends State<ScanScreen>
       case ScanMode.photo:
         await _initPhotoCamera();
       case ScanMode.external:
-        _extCtrl.clear();
-        _extStatus = 'Ready';
-        _extActive = false;
-        _extFocusNode.requestFocus();
+        _scannerStatus = 'Connecting...';
+        _scannerConnected = false;
+        await _scanner.connect();
+        _onScannerStatusChanged();
+        _scannerSub?.cancel();
+        _scannerSub = _scanner.barcodeStream.listen(_onScannerBarcode);
     }
   }
 
@@ -279,24 +293,13 @@ class _ScanScreenState extends State<ScanScreen>
     if (mounted) setState(() {});
   }
 
-  void _onExtBarcode(String value) {
-    if (value.trim().isNotEmpty) {
-      setState(() => _extStatus = 'Scanned!');
-      if (mounted) {
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted) Navigator.of(context).pop(value.trim());
-        });
-      }
-    }
-  }
-
   @override
   void dispose() {
+    _scannerSub?.cancel();
+    _scanner.dispose();
     _animCtrl.dispose();
     _scannerController.dispose();
     _cameraController?.dispose();
-    _extFocusNode.dispose();
-    _extCtrl.dispose();
     super.dispose();
   }
 
@@ -380,7 +383,7 @@ class _ScanScreenState extends State<ScanScreen>
                 child: Row(
                   children: [
                     Icon(
-                      Icons.keyboard,
+                      Icons.usb,
                       color: _scanMode == ScanMode.external
                           ? _accent
                           : _textBright,
@@ -535,6 +538,7 @@ class _ScanScreenState extends State<ScanScreen>
   }
 
   Widget _buildExternalMode() {
+    final connected = _scannerConnected;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -553,15 +557,15 @@ class _ScanScreenState extends State<ScanScreen>
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: _extActive
+                    color: connected
                         ? const Color(0xFF0A2E1A)
                         : const Color(0xFF1C2128),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Icon(
-                    Icons.keyboard,
+                    connected ? Icons.usb : Icons.usb_off,
                     size: 48,
-                    color: _extActive ? const Color(0xFF58C4A6) : _textDim,
+                    color: connected ? const Color(0xFF58C4A6) : _textDim,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -573,63 +577,60 @@ class _ScanScreenState extends State<ScanScreen>
                       height: 8,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: _extActive ? const Color(0xFF58C4A6) : _textDim,
+                        color: connected ? const Color(0xFF58C4A6) : Colors.redAccent,
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      _extStatus,
-                      style: TextStyle(
-                        color: _extActive ? const Color(0xFF58C4A6) : _textDim,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
+                    Flexible(
+                      child: Text(
+                        _scannerStatus,
+                        style: TextStyle(
+                          color: connected ? const Color(0xFF58C4A6) : _textDim,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Use a USB barcode scanner',
+                  connected
+                      ? 'USB scanner connected — scan a barcode'
+                      : 'Connect a USB barcode scanner',
                   style: TextStyle(color: _textDim, fontSize: 13),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                TextField(
-                  controller: _extCtrl,
-                  focusNode: _extFocusNode,
-                  autofocus: true,
-                  style: const TextStyle(color: _textBright, fontSize: 18),
-                  decoration: InputDecoration(
-                    hintText: 'Barcode will appear here...',
-                    hintStyle: TextStyle(
-                      color: _textDim.withValues(alpha: 0.5),
-                    ),
-                    prefixIcon: const Icon(Icons.qr_code, color: _textDim),
-                    filled: true,
-                    fillColor: const Color(0xFF0D1117),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF58C4A6),
-                        width: 2,
-                      ),
-                    ),
-                  ),
-                  onSubmitted: _onExtBarcode,
-                  textInputAction: TextInputAction.done,
+                FilledButton.icon(
+                  onPressed: _scannerConnected
+                      ? null
+                      : () async {
+                          setState(() => _scannerStatus = 'Connecting...');
+                          await _scanner.connect();
+                          _onScannerStatusChanged();
+                          _scannerSub?.cancel();
+                          _scannerSub = _scanner.barcodeStream.listen(
+                            _onScannerBarcode,
+                          );
+                        },
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: Text(_scannerConnected ? 'Connected' : 'Retry'),
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Scanner ready — point at a barcode',
+                  'Or enter barcode manually',
                   style: TextStyle(
                     color: _textDim.withValues(alpha: 0.7),
                     fontSize: 11,
                   ),
                   textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _manualEntry,
+                  icon: const Icon(Icons.keyboard, size: 18),
+                  label: const Text('Manual Entry'),
                 ),
               ],
             ),

@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/product.dart';
@@ -157,7 +159,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
       ),
     );
     if (path != null && mounted) {
-      setState(() => _imagePath = path);
+      final saved = await _saveImageToPersistentStorage(path);
+      if (mounted) setState(() => _imagePath = saved ?? path);
     }
   }
 
@@ -167,7 +170,9 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         type: FileType.image,
       );
       if (result != null && result.files.single.path != null && mounted) {
-        setState(() => _imagePath = result.files.single.path!);
+        final saved =
+            await _saveImageToPersistentStorage(result.files.single.path!);
+        if (mounted) setState(() => _imagePath = saved ?? result.files.single.path!);
       }
     } catch (e) {
       if (mounted) {
@@ -178,11 +183,31 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     }
   }
 
+  /// Copy [sourcePath] to the app's persistent documents directory so the
+  /// image survives cache clears and temp-file deletions. Returns the
+  /// persistent path, or `null` if copying failed.
+  static Future<String?> _saveImageToPersistentStorage(String sourcePath) async {
+    try {
+      final dir = Directory(
+        p.join((await getApplicationDocumentsDirectory()).path, 'product_images'),
+      );
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+
+      final ext = p.extension(sourcePath);
+      final dest = p.join(dir.path, '${DateTime.now().millisecondsSinceEpoch}$ext');
+      await File(sourcePath).copy(dest);
+      return dest;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> _authenticate() async {
     final db = DatabaseHelper.instance;
     final hasPassword = await db.isPasswordSet();
 
     if (!hasPassword) {
+      if (!mounted) return false;
       final pinCtrl = TextEditingController();
       final setupPin = await showDialog<String>(
         context: context,
@@ -249,6 +274,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     }
 
     for (var attempts = 0; attempts < 3; attempts++) {
+      if (!mounted) return false;
       final pinCtrl = TextEditingController();
       final input = await showDialog<String>(
         context: context,

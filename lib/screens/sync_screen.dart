@@ -146,10 +146,13 @@ class _SyncScreenState extends State<SyncScreen> {
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
                       await GoogleSheetsSync.signOut();
                       if (mounted) {
                         setState(() => _result = null);
-                        ScaffoldMessenger.of(context).showSnackBar(
+                      }
+                      if (mounted) {
+                        messenger.showSnackBar(
                           const SnackBar(
                             content: Text('Signed out of Google'),
                             behavior: SnackBarBehavior.floating,

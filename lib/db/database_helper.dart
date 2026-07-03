@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -124,14 +128,31 @@ class DatabaseHelper {
     return pw != null && pw.isNotEmpty;
   }
 
+  /// Stored as "saltHex:hashHex" — never the raw password.
+  String _hashPassword(String password, String saltHex) {
+    final bytes = utf8.encode('$saltHex:$password');
+    return sha256.convert(bytes).toString();
+  }
+
+  String _generateSalt() {
+    final rand = Random.secure();
+    final bytes = List<int>.generate(16, (_) => rand.nextInt(256));
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
   Future<bool> verifyPassword(String input) async {
     final stored = await getSetting('edit_password');
-    if (stored == null) return false;
-    return stored == input;
+    if (stored == null || !stored.contains(':')) return false;
+    final parts = stored.split(':');
+    final salt = parts[0];
+    final storedHash = parts[1];
+    return _hashPassword(input, salt) == storedHash;
   }
 
   Future<void> setPassword(String password) async {
-    await setSetting('edit_password', password);
+    final salt = _generateSalt();
+    final hash = _hashPassword(password, salt);
+    await setSetting('edit_password', '$salt:$hash');
   }
 
   // ── Receipts ──
@@ -283,15 +304,21 @@ class DatabaseHelper {
   }
 
   /// Insert or update by barcode. Used for scanning restock and for import.
+  /// Logs a stock movement when quantity changes and a price change entry
+  /// when price/cost changes, same as the direct update paths, and wraps
+  /// everything in one transaction so the update and its log entries either
+  /// all land or none do.
   Future<void> upsertByBarcode(Product product) async {
     final db = await database;
-
     final existing = await getProductByBarcode(product.barcode);
 
-    if (existing == null) {
-      await db.insert('products', product.toMap());
-    } else {
-      await db.update(
+    await db.transaction((txn) async {
+      if (existing == null) {
+        await txn.insert('products', product.toMap());
+        return;
+      }
+
+      await txn.update(
         'products',
         {
           'barcode': product.barcode,
@@ -309,7 +336,31 @@ class DatabaseHelper {
         where: 'id=?',
         whereArgs: [existing.id],
       );
-    }
+
+      if (product.quantity != existing.quantity) {
+        await txn.insert('stock_movements', {
+          'product_id': existing.id,
+          'product_name': product.name,
+          'old_quantity': existing.quantity,
+          'new_quantity': product.quantity,
+          'delta': product.quantity - existing.quantity,
+          'type': product.quantity > existing.quantity ? 'restock' : 'adjustment',
+          'date': DateTime.now().toIso8601String(),
+        });
+      }
+
+      if (product.price != existing.price || product.cost != existing.cost) {
+        await txn.insert('price_changes', {
+          'product_id': existing.id,
+          'product_name': product.name,
+          'old_price': existing.price,
+          'new_price': product.price,
+          'old_cost': existing.cost,
+          'new_cost': product.cost,
+          'date': DateTime.now().toIso8601String(),
+        });
+      }
+    });
   }
 
   Future<Product?> getProductById(int id) async {
@@ -327,13 +378,16 @@ class DatabaseHelper {
     return Product.fromMap(rows.first);
   }
 
-  Future<List<Product>> getLowStockProducts({int limit = 5}) async {
+  /// [threshold]: products with quantity at or below this count are
+  /// considered low stock. This is NOT a row limit — every matching
+  /// product is returned.
+  Future<List<Product>> getLowStockProducts({int threshold = 5}) async {
     final db = await database;
 
     final rows = await db.query(
       'products',
       where: 'quantity <= ?',
-      whereArgs: [limit],
+      whereArgs: [threshold],
       orderBy: 'quantity ASC',
     );
 
@@ -415,30 +469,40 @@ class DatabaseHelper {
     return db.delete('products', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// Reads the current quantity, applies [deltaQuantity] (clamped at 0), and
+  /// logs the movement — all inside one transaction so concurrent callers
+  /// (e.g. two POS checkouts touching the same product) can't race each
+  /// other between the read and the write, and a failure partway through
+  /// rolls back automatically instead of leaving a partial update.
   Future<int> adjustStock(int id, int deltaQuantity) async {
     final db = await database;
-    final rows = await db.query('products', where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) return 0;
-    final current = Product.fromMap(rows.first);
-    final newQty = current.quantity + deltaQuantity;
-    final clamped = newQty < 0 ? 0 : newQty;
-    await db.update(
-      'products',
-      {
-        'quantity': clamped,
-        'date_updated': DateTime.now().toIso8601String(),
-      },
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    await _logMovement(
-      productId: id,
-      productName: current.name,
-      oldQuantity: current.quantity,
-      newQuantity: clamped,
-      type: deltaQuantity > 0 ? 'add' : 'sale',
-    );
-    return clamped;
+    return db.transaction((txn) async {
+      final rows =
+      await txn.query('products', where: 'id = ?', whereArgs: [id]);
+      if (rows.isEmpty) return 0;
+      final current = Product.fromMap(rows.first);
+      final newQty = current.quantity + deltaQuantity;
+      final clamped = newQty < 0 ? 0 : newQty;
+      await txn.update(
+        'products',
+        {
+          'quantity': clamped,
+          'date_updated': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await txn.insert('stock_movements', {
+        'product_id': id,
+        'product_name': current.name,
+        'old_quantity': current.quantity,
+        'new_quantity': clamped,
+        'delta': clamped - current.quantity,
+        'type': deltaQuantity > 0 ? 'add' : 'sale',
+        'date': DateTime.now().toIso8601String(),
+      });
+      return clamped;
+    });
   }
 
   // ── Stock Movements ──

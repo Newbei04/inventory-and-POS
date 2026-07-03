@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../theme/app_theme.dart';
+import '../utils/usb_scanner_service.dart';
 import '../widgets/empty_state_widget.dart';
 import 'scan_screen.dart';
 
@@ -26,8 +28,10 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   String? _error;
   bool _showingList = false;
   bool _externalScanner = false;
-  bool _suppressOnChanged = false;
-  final _extFocusNode = FocusNode();
+  final _scanner = UsbScannerService();
+  StreamSubscription<String>? _scannerSub;
+  bool _scannerConnected = false;
+  String _scannerStatus = 'Disconnected';
 
   @override
   void initState() {
@@ -37,8 +41,9 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
 
   @override
   void dispose() {
+    _scannerSub?.cancel();
+    _scanner.dispose();
     _searchCtrl.dispose();
-    _extFocusNode.dispose();
     super.dispose();
   }
 
@@ -52,7 +57,6 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   }
 
   void _onSearchChanged(String query) {
-    if (_suppressOnChanged) return;
     if (_product != null) {
       setState(() {
         _product = null;
@@ -131,20 +135,30 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
       ),
     );
     if (barcode != null && mounted) {
-      _suppressOnChanged = true;
       _searchCtrl.text = barcode;
-      _suppressOnChanged = false;
       _lookup(barcode);
     }
   }
 
-  void _onExtBarcode(String barcode) {
+  void _onScannerBarcode(String barcode) {
     if (barcode.trim().isNotEmpty) {
-      _suppressOnChanged = true;
       _searchCtrl.text = barcode;
-      _suppressOnChanged = false;
       _lookup(barcode);
     }
+  }
+
+  void _startScanner() {
+    _scanner.connect();
+    _scannerSub?.cancel();
+    _scannerSub = _scanner.barcodeStream.listen((barcode) {
+      if (mounted) {
+        setState(() {
+          _scannerConnected = _scanner.isConnected;
+          _scannerStatus = _scanner.status;
+        });
+        _onScannerBarcode(barcode);
+      }
+    });
   }
 
   void _showScannerSettings() {
@@ -191,10 +205,10 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
             ),
             const SizedBox(height: 8),
             _scannerOption(
-              icon: Icons.keyboard,
-              title: 'External Scanner',
+              icon: Icons.usb,
+              title: 'USB Scanner',
               subtitle:
-                  'Use a USB barcode scanner (keyboard wedge)',
+                  'Use a USB barcode scanner',
               selected: _externalScanner,
               onTap: () {
                 setState(() {
@@ -206,7 +220,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
                   _showingList = false;
                 });
                 Navigator.pop(context);
-                _extFocusNode.requestFocus();
+                _startScanner();
               },
             ),
           ],
@@ -566,6 +580,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   }
 
   Widget _buildExternalScannerUI() {
+    final connected = _scannerConnected;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -574,64 +589,68 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: connected ? Colors.green.shade50 : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Icon(
-                Icons.keyboard,
+              child: Icon(
+                connected ? Icons.usb : Icons.usb_off,
                 size: 40,
-                color: Colors.green,
+                color: connected ? Colors.green : Colors.grey,
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'External Scanner Mode',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+            Text(
+              connected ? 'USB Scanner Connected' : 'USB Scanner',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
             ),
             const SizedBox(height: 4),
             Text(
-              'Scan using a USB barcode scanner',
+              connected
+                  ? 'Scan a barcode — it will search automatically'
+                  : _scannerStatus,
               style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            TextField(
-              focusNode: _extFocusNode,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: 'Barcode will appear here...',
-                prefixIcon: const Icon(Icons.qr_code),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.camera_alt_outlined),
-                  tooltip: 'Switch to camera scanner',
-                  onPressed: () {
-                    setState(() {
-                      _externalScanner = false;
-                    });
-                  },
-                ),
-                filled: true,
-                fillColor: Colors.grey.shade50,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide:
-                      BorderSide(color: Colors.green.shade400, width: 2),
-                ),
+            if (!connected)
+              FilledButton.icon(
+                onPressed: _startScanner,
+                icon: const Icon(Icons.usb, size: 18),
+                label: const Text('Connect USB Scanner'),
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.green,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Ready',
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
               ),
-              onSubmitted: _onExtBarcode,
-              textInputAction: TextInputAction.done,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Point your scanner at a barcode — '
-                  'it will appear and search automatically',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-              textAlign: TextAlign.center,
-            ),
+            if (!connected) ...[
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: () {
+                  setState(() => _externalScanner = false);
+                },
+                icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                label: const Text('Switch to Camera Scanner'),
+              ),
+            ],
           ],
         ),
       ),

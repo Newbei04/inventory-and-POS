@@ -331,7 +331,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   Future<void> _downloadTemplate() async {
     setState(() => _loading = true);
     try {
-      final path = await ExportImportHelper.downloadTemplate();
+      await ExportImportHelper.downloadTemplate();
       if (mounted) {
         final dir = ExportImportHelper.getExportsDirPath();
         ScaffoldMessenger.of(context).showSnackBar(

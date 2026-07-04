@@ -1,6 +1,8 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
+enum FlashModeOption { flash, noFlash, torch }
+
 class CameraCaptureScreen extends StatefulWidget {
   const CameraCaptureScreen({super.key});
 
@@ -13,8 +15,30 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
   CameraController? _controller;
   List<CameraDescription>? _cameras;
   bool _ready = false;
-  bool _flashOn = false;
+  FlashModeOption _flashMode = FlashModeOption.flash;
   bool _capturing = false;
+
+  FlashMode get _previewFlashMode {
+    switch (_flashMode) {
+      case FlashModeOption.flash:
+        return FlashMode.torch;
+      case FlashModeOption.noFlash:
+        return FlashMode.off;
+      case FlashModeOption.torch:
+        return FlashMode.torch;
+    }
+  }
+
+  FlashMode get _captureFlashMode {
+    switch (_flashMode) {
+      case FlashModeOption.flash:
+        return FlashMode.always;
+      case FlashModeOption.noFlash:
+        return FlashMode.off;
+      case FlashModeOption.torch:
+        return FlashMode.torch;
+    }
+  }
 
   @override
   void initState() {
@@ -55,9 +79,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
       }
       final controller = CameraController(cameras[0], ResolutionPreset.medium);
       await controller.initialize();
-      if (_flashOn) {
-        await controller.setFlashMode(FlashMode.torch);
-      }
+      await controller.setFlashMode(_previewFlashMode);
       if (mounted) {
         setState(() {
           _cameras = cameras;
@@ -79,10 +101,9 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     if (_controller == null || !_controller!.value.isInitialized || _capturing) return;
     setState(() => _capturing = true);
     try {
-      if (_flashOn) {
-        await _controller!.setFlashMode(FlashMode.always);
-      }
+      await _controller!.setFlashMode(_captureFlashMode);
       final file = await _controller!.takePicture();
+      await _controller!.setFlashMode(_previewFlashMode);
       if (mounted) {
         setState(() => _capturing = false);
         Navigator.of(context).pop(file.path);
@@ -104,9 +125,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     try {
       final newController = CameraController(_cameras![next], ResolutionPreset.medium);
       await newController.initialize();
-      if (_flashOn) {
-        await newController.setFlashMode(FlashMode.torch);
-      }
+      await newController.setFlashMode(_previewFlashMode);
       final old = _controller;
       if (mounted) {
         setState(() {
@@ -125,12 +144,15 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
 
   Future<void> _toggleFlash() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
-    final newMode = !_flashOn;
+    final values = FlashModeOption.values;
+    final next = values[(_flashMode.index + 1) % values.length];
     try {
       await _controller!.setFlashMode(
-        newMode ? FlashMode.torch : FlashMode.off,
+        next == FlashModeOption.flash || next == FlashModeOption.torch
+            ? FlashMode.torch
+            : FlashMode.off,
       );
-      _flashOn = newMode;
+      _flashMode = next;
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
@@ -272,14 +294,20 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: _flashOn
+                    color: _flashMode != FlashModeOption.noFlash
                         ? Colors.amber.withValues(alpha: 0.3)
                         : Colors.white.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
-                    _flashOn ? Icons.flash_on : Icons.flash_off,
-                    color: _flashOn ? Colors.amber : Colors.white,
+                    _flashMode == FlashModeOption.flash
+                        ? Icons.flash_on
+                        : _flashMode == FlashModeOption.torch
+                            ? Icons.flashlight_on
+                            : Icons.flash_off,
+                    color: _flashMode != FlashModeOption.noFlash
+                        ? Colors.amber
+                        : Colors.white,
                     size: 24,
                   ),
                 ),

@@ -493,20 +493,84 @@ class ExportImportHelper {
 
   // ── Import ──
 
-  /// Generate a template CSV file and save it to the downloads directory.
+  /// Generate a template Excel file with three sheets (Products, Stock Movements, Price Changes).
   static Future<String> downloadTemplate() async {
-    final rows = <List<dynamic>>[
-      [
-        'barcode', 'name', 'category', 'price', 'cost',
-        'quantity', 'unit', 'description', 'image_data',
-      ],
-      [
-        '123456789', 'Sample Product', 'General', '99.99', '50.00',
-        '100', 'pcs', 'Optional description', '',
-      ],
-    ];
-    final csv = const ListToCsvConverter().convert(rows);
-    return _saveFileFromString('import_template', 'csv', csv);
+    final excel = Excel.createExcel();
+
+    final productSheet = excel['Products'];
+    productSheet.appendRow([
+      TextCellValue('barcode'),
+      TextCellValue('name'),
+      TextCellValue('category'),
+      TextCellValue('price'),
+      TextCellValue('cost'),
+      TextCellValue('quantity'),
+      TextCellValue('unit'),
+      TextCellValue('description'),
+      TextCellValue('image_data'),
+      TextCellValue('date_added'),
+      TextCellValue('date_updated'),
+    ]);
+    productSheet.appendRow([
+      TextCellValue('123456789'),
+      TextCellValue('Sample Product'),
+      TextCellValue('General'),
+      DoubleCellValue(99.99),
+      DoubleCellValue(50.00),
+      IntCellValue(100),
+      TextCellValue('pcs'),
+      TextCellValue('Optional description'),
+      TextCellValue(''),
+      TextCellValue(DateTime.now().toIso8601String()),
+      TextCellValue(DateTime.now().toIso8601String()),
+    ]);
+
+    final stockSheet = excel['Stock Movements'];
+    stockSheet.appendRow([
+      TextCellValue('product_id'),
+      TextCellValue('product_name'),
+      TextCellValue('old_quantity'),
+      TextCellValue('new_quantity'),
+      TextCellValue('delta'),
+      TextCellValue('type'),
+      TextCellValue('reason'),
+      TextCellValue('date'),
+    ]);
+    stockSheet.appendRow([
+      IntCellValue(1),
+      TextCellValue('Sample Product'),
+      IntCellValue(0),
+      IntCellValue(100),
+      IntCellValue(100),
+      TextCellValue('add'),
+      TextCellValue('Initial stock'),
+      TextCellValue(DateTime.now().toIso8601String()),
+    ]);
+
+    final priceSheet = excel['Price Changes'];
+    priceSheet.appendRow([
+      TextCellValue('product_id'),
+      TextCellValue('product_name'),
+      TextCellValue('old_price'),
+      TextCellValue('new_price'),
+      TextCellValue('old_cost'),
+      TextCellValue('new_cost'),
+      TextCellValue('date'),
+    ]);
+    priceSheet.appendRow([
+      IntCellValue(1),
+      TextCellValue('Sample Product'),
+      DoubleCellValue(0),
+      DoubleCellValue(99.99),
+      DoubleCellValue(0),
+      DoubleCellValue(50.00),
+      TextCellValue(DateTime.now().toIso8601String()),
+    ]);
+
+    excel.delete('Sheet1');
+    final bytes = excel.encode();
+    if (bytes == null) throw Exception('Failed to encode template');
+    return _saveFile('import_template', 'xlsx', bytes);
   }
 
   static Directory? _imageDir;
@@ -559,12 +623,77 @@ class ExportImportHelper {
     if (rows.length < 2) {
       return ImportResult(products: [], errors: ['File has no data rows']);
     }
-    return _parseRows(rows);
+
+    final headers = rows[0].map((e) => e.toString().trim().toLowerCase()).toList();
+
+    if (headers.contains('product_id') && (headers.contains('old_quantity') || headers.contains('delta'))) {
+      final result = _parseStockMovementRows(rows);
+      return ImportResult(products: [], stockMovements: result.movements, errors: result.errors);
+    }
+    if (headers.contains('product_id') && (headers.contains('old_price') || headers.contains('new_price'))) {
+      final result = _parsePriceChangeRows(rows);
+      return ImportResult(products: [], priceChanges: result.changes, errors: result.errors);
+    }
+    return _parseProductRows(rows);
   }
 
   static Future<ImportResult> _fromJSON(String filePath) async {
     final content = await File(filePath).readAsString();
     final data = json.decode(content) as List<dynamic>;
+    if (data.isEmpty) {
+      return ImportResult(products: [], errors: ['Empty JSON file']);
+    }
+
+    final first = data.first;
+    if (first is Map) {
+      final keys = first.keys.map((e) => e.toString().toLowerCase()).toSet();
+
+      if (keys.contains('product_id') && (keys.contains('old_quantity') || keys.contains('delta'))) {
+        final movements = <StockMovement>[];
+        final errors = <String>[];
+        for (var i = 0; i < data.length; i++) {
+          final e = data[i];
+          try {
+            movements.add(StockMovement(
+              productId: _intVal(e, 'product_id', 0),
+              productName: _val(e, 'product_name'),
+              oldQuantity: _intVal(e, 'old_quantity', 0),
+              newQuantity: _intVal(e, 'new_quantity', 0),
+              delta: _intVal(e, 'delta', 0),
+              type: _val(e, 'type', 'adjustment'),
+              reason: _val(e, 'reason'),
+              date: _val(e, 'date', DateTime.now().toIso8601String()),
+            ));
+          } catch (e) {
+            errors.add('Row $i: $e');
+          }
+        }
+        return ImportResult(products: [], stockMovements: movements, errors: errors);
+      }
+
+      if (keys.contains('product_id') && (keys.contains('old_price') || keys.contains('new_price'))) {
+        final changes = <PriceChange>[];
+        final errors = <String>[];
+        for (var i = 0; i < data.length; i++) {
+          final e = data[i];
+          try {
+            changes.add(PriceChange(
+              productId: _intVal(e, 'product_id', 0),
+              productName: _val(e, 'product_name'),
+              oldPrice: _numVal(e, 'old_price', 0),
+              newPrice: _numVal(e, 'new_price', 0),
+              oldCost: _numVal(e, 'old_cost', 0),
+              newCost: _numVal(e, 'new_cost', 0),
+              date: _val(e, 'date', DateTime.now().toIso8601String()),
+            ));
+          } catch (e) {
+            errors.add('Row $i: $e');
+          }
+        }
+        return ImportResult(products: [], priceChanges: changes, errors: errors);
+      }
+    }
+
     final rows = <List<dynamic>>[
       [
         'barcode', 'name', 'category', 'price', 'cost',
@@ -586,13 +715,34 @@ class ExportImportHelper {
           _val(e, 'date_updated', DateTime.now().toIso8601String()),
         ],
     ];
-    return _parseRows(rows);
+    return _parseProductRows(rows);
   }
 
   static String _val(dynamic obj, String key, [String fallback = '']) {
     if (obj is Map) {
       final v = obj[key];
-      return v?.toString() ?? fallback;
+      if (v == null) return fallback;
+      return v.toString();
+    }
+    return fallback;
+  }
+
+  static double _numVal(dynamic obj, String key, [double fallback = 0]) {
+    if (obj is Map) {
+      final v = obj[key];
+      if (v == null) return fallback;
+      if (v is num) return v.toDouble();
+      return double.tryParse(v.toString()) ?? fallback;
+    }
+    return fallback;
+  }
+
+  static int _intVal(dynamic obj, String key, [int fallback = 0]) {
+    if (obj is Map) {
+      final v = obj[key];
+      if (v == null) return fallback;
+      if (v is num) return v.toInt();
+      return int.tryParse(v.toString()) ?? fallback;
     }
     return fallback;
   }
@@ -603,21 +753,48 @@ class ExportImportHelper {
     if (excel.tables.isEmpty) {
       return ImportResult(products: [], errors: ['Empty Excel file']);
     }
-    final sheet = excel.tables.values.first;
-    if (sheet.rows.length < 2) {
-      return ImportResult(products: [], errors: ['Excel file has no data rows']);
+
+    final errors = <String>[];
+    var products = <Product>[];
+    var movements = <StockMovement>[];
+    var changes = <PriceChange>[];
+
+    for (final tableName in excel.tables.keys) {
+      final sheet = excel.tables[tableName]!;
+      if (sheet.rows.length < 2) continue;
+
+      final allRows = <List<dynamic>>[
+        sheet.rows.first.map((c) => c?.value?.toString() ?? '').toList(),
+        ...sheet.rows.sublist(1).map(
+          (r) => r.map((c) => c?.value?.toString() ?? '').toList(),
+        ),
+      ];
+
+      final nameLower = tableName.toLowerCase();
+      if (nameLower.contains('product')) {
+        final result = await _parseProductRows(allRows);
+        products = result.products;
+        errors.addAll(result.errors);
+      } else if (nameLower.contains('stock') || nameLower.contains('movement')) {
+        final result = _parseStockMovementRows(allRows);
+        movements = result.movements;
+        errors.addAll(result.errors);
+      } else if (nameLower.contains('price') || nameLower.contains('change')) {
+        final result = _parsePriceChangeRows(allRows);
+        changes = result.changes;
+        errors.addAll(result.errors);
+      }
     }
 
-    final allRows = <List<dynamic>>[
-      sheet.rows.first.map((c) => c?.value?.toString() ?? '').toList(),
-      ...sheet.rows.sublist(1).map(
-        (r) => r.map((c) => c?.value?.toString() ?? '').toList(),
-      ),
-    ];
-    return _parseRows(allRows);
+    return ImportResult(
+      products: products,
+      stockMovements: movements,
+      priceChanges: changes,
+      errors: errors,
+    );
   }
 
-  static Future<ImportResult> _parseRows(List<List<dynamic>> rows) async {
+  static Future<ImportResult> _parseProductRows(List<List<dynamic>> rows) async {
     final headers =
         rows[0].map((e) => e.toString().trim().toLowerCase()).toList();
     final products = <Product>[];
@@ -667,6 +844,83 @@ class ExportImportHelper {
     return ImportResult(products: products, errors: errors);
   }
 
+  static _StockMovementParseResult _parseStockMovementRows(List<List<dynamic>> rows) {
+    final headers = rows[0].map((e) => e.toString().trim().toLowerCase()).toList();
+    final movements = <StockMovement>[];
+    final errors = <String>[];
+
+    for (var i = 1; i < rows.length; i++) {
+      final row = rows[i];
+      if (row.isEmpty) continue;
+      if (row.every((e) => e.toString().trim().isEmpty)) continue;
+
+      final data = <String, dynamic>{};
+      for (var j = 0; j < headers.length; j++) {
+        data[headers[j]] = j < row.length ? row[j] : '';
+      }
+
+      try {
+        final movement = StockMovement(
+          productId: _int(data, 'product_id', 0),
+          productName: _str(data, 'product_name', ''),
+          oldQuantity: _int(data, 'old_quantity', 0),
+          newQuantity: _int(data, 'new_quantity', 0),
+          delta: _int(data, 'delta', 0),
+          type: _str(data, 'type', 'adjustment'),
+          reason: _str(data, 'reason', ''),
+          date: _str(data, 'date', DateTime.now().toIso8601String()),
+        );
+        if (movement.productName.isEmpty) {
+          errors.add('Row $i: missing product_name');
+        } else {
+          movements.add(movement);
+        }
+      } catch (e) {
+        errors.add('Row $i: $e');
+      }
+    }
+
+    return _StockMovementParseResult(movements: movements, errors: errors);
+  }
+
+  static _PriceChangeParseResult _parsePriceChangeRows(List<List<dynamic>> rows) {
+    final headers = rows[0].map((e) => e.toString().trim().toLowerCase()).toList();
+    final changes = <PriceChange>[];
+    final errors = <String>[];
+
+    for (var i = 1; i < rows.length; i++) {
+      final row = rows[i];
+      if (row.isEmpty) continue;
+      if (row.every((e) => e.toString().trim().isEmpty)) continue;
+
+      final data = <String, dynamic>{};
+      for (var j = 0; j < headers.length; j++) {
+        data[headers[j]] = j < row.length ? row[j] : '';
+      }
+
+      try {
+        final change = PriceChange(
+          productId: _int(data, 'product_id', 0),
+          productName: _str(data, 'product_name', ''),
+          oldPrice: _num(data, 'old_price', 0),
+          newPrice: _num(data, 'new_price', 0),
+          oldCost: _num(data, 'old_cost', 0),
+          newCost: _num(data, 'new_cost', 0),
+          date: _str(data, 'date', DateTime.now().toIso8601String()),
+        );
+        if (change.productName.isEmpty) {
+          errors.add('Row $i: missing product_name');
+        } else {
+          changes.add(change);
+        }
+      } catch (e) {
+        errors.add('Row $i: $e');
+      }
+    }
+
+    return _PriceChangeParseResult(changes: changes, errors: errors);
+  }
+
   /// Decode base64 image data, save to app documents directory.
   static String _saveImageFromBase64(
       String base64data, String barcode, Directory imageDir) {
@@ -704,13 +958,32 @@ class ExportImportHelper {
   }
 }
 
+class _StockMovementParseResult {
+  final List<StockMovement> movements;
+  final List<String> errors;
+  _StockMovementParseResult({required this.movements, required this.errors});
+}
+
+class _PriceChangeParseResult {
+  final List<PriceChange> changes;
+  final List<String> errors;
+  _PriceChangeParseResult({required this.changes, required this.errors});
+}
+
 class ImportResult {
   final List<Product> products;
+  final List<StockMovement> stockMovements;
+  final List<PriceChange> priceChanges;
   final List<String> errors;
 
-  ImportResult({required this.products, required this.errors});
+  ImportResult({
+    required this.products,
+    this.stockMovements = const [],
+    this.priceChanges = const [],
+    required this.errors,
+  });
 
-  int get successCount => products.length;
+  int get successCount => products.length + stockMovements.length + priceChanges.length;
   int get errorCount => errors.length;
   bool get hasErrors => errors.isNotEmpty;
 }

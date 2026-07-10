@@ -713,6 +713,24 @@ class DatabaseHelper {
     return rows.map((r) => StockMovement.fromMap(r)).toList();
   }
 
+  Future<int> insertStockMovementRaw(StockMovement movement) async {
+    final db = await database;
+    return db.insert('stock_movements', movement.toMap()..remove('id'));
+  }
+
+  Future<int> insertPriceChangeRaw(PriceChange change) async {
+    final db = await database;
+    return db.insert('price_changes', {
+      'product_id': change.productId,
+      'product_name': change.productName,
+      'old_price': change.oldPrice,
+      'new_price': change.newPrice,
+      'old_cost': change.oldCost,
+      'new_cost': change.newCost,
+      'date': change.date,
+    });
+  }
+
   Future<List<StockMovement>> getStockMovementsByProduct(int productId) async {
     final db = await database;
     final rows = await db.query(

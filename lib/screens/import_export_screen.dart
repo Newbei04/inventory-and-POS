@@ -279,11 +279,13 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     setState(() => _loading = true);
     try {
       final result = await ExportImportHelper.pickAndImport();
-      if (result.products.isEmpty && result.errors.isEmpty) return;
+      if (result.products.isEmpty && result.stockMovements.isEmpty && result.priceChanges.isEmpty && result.errors.isEmpty) return;
 
       int imported = 0;
       int updated = 0;
       int skipped = 0;
+      int movementsImported = 0;
+      int priceChangesImported = 0;
       final importErrors = <String>[];
 
       for (final product in result.products) {
@@ -303,9 +305,6 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
             }
             imported++;
           } else {
-            // upsertByBarcode already logs the stock movement / price change
-            // entries internally when quantity or price/cost differ, so we
-            // don't log them again here — doing so would double every entry.
             await _dbHelper.upsertByBarcode(product);
             updated++;
           }
@@ -315,8 +314,26 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
         }
       }
 
+      for (final movement in result.stockMovements) {
+        try {
+          await _dbHelper.insertStockMovementRaw(movement);
+          movementsImported++;
+        } catch (e) {
+          importErrors.add('Stock movement ${movement.productName}: $e');
+        }
+      }
+
+      for (final change in result.priceChanges) {
+        try {
+          await _dbHelper.insertPriceChangeRaw(change);
+          priceChangesImported++;
+        } catch (e) {
+          importErrors.add('Price change ${change.productName}: $e');
+        }
+      }
+
       if (mounted) {
-        _showResultDialog(imported, updated, skipped, [
+        _showResultDialog(imported, updated, skipped, movementsImported, priceChangesImported, [
           ...result.errors,
           ...importErrors,
         ]);
@@ -349,6 +366,8 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     int imported,
     int updated,
     int skipped,
+    int movementsImported,
+    int priceChangesImported,
     List<String> errors,
   ) {
     showDialog(
@@ -373,6 +392,26 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                   const Icon(Icons.edit, color: Colors.blue, size: 20),
                   const SizedBox(width: 8),
                   Text('$updated products updated'),
+                ],
+              ),
+            ],
+            if (movementsImported > 0) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.swap_vert, color: Colors.teal, size: 20),
+                  const SizedBox(width: 8),
+                  Text('$movementsImported stock movements imported'),
+                ],
+              ),
+            ],
+            if (priceChangesImported > 0) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.trending_up, color: Colors.purple, size: 20),
+                  const SizedBox(width: 8),
+                  Text('$priceChangesImported price changes imported'),
                 ],
               ),
             ],

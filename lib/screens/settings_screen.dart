@@ -67,56 +67,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // ── Import / Export (moved from ImportExportScreen) ──
 
-  Future<String?> _pickFormat({bool showAll = false}) {
-    return showModalBottomSheet<String>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Choose export format',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 16),
-              if (!showAll) ...[
-                ListTile(
-                  leading: const Icon(Icons.table_chart_outlined, color: Colors.blue),
-                  title: const Text('CSV'),
-                  subtitle: const Text('Comma-separated values'),
-                  onTap: () => Navigator.pop(context, 'csv'),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                const SizedBox(height: 4),
-              ],
-              ListTile(
-                leading: const Icon(Icons.grid_on, color: Colors.green),
-                title: const Text('Excel'),
-                subtitle: const Text('.xlsx format'),
-                onTap: () => Navigator.pop(context, 'xlsx'),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _exportAll() async {
     setState(() => _loading = true);
     try {
@@ -191,11 +141,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _loading = true);
     try {
       final result = await ExportImportHelper.pickAndImport();
-      if (result.products.isEmpty && result.errors.isEmpty) return;
+      if (result.products.isEmpty && result.stockMovements.isEmpty && result.priceChanges.isEmpty && result.errors.isEmpty) return;
 
       int imported = 0;
       int updated = 0;
       int skipped = 0;
+      int movementsImported = 0;
+      int priceChangesImported = 0;
       final importErrors = <String>[];
 
       for (final product in result.products) {
@@ -224,7 +176,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
 
-      if (mounted) _showResultDialog(imported, updated, skipped, [...result.errors, ...importErrors]);
+      for (final movement in result.stockMovements) {
+        try {
+          await _db.insertStockMovementRaw(movement);
+          movementsImported++;
+        } catch (e) {
+          importErrors.add('Stock movement ${movement.productName}: $e');
+        }
+      }
+
+      for (final change in result.priceChanges) {
+        try {
+          await _db.insertPriceChangeRaw(change);
+          priceChangesImported++;
+        } catch (e) {
+          importErrors.add('Price change ${change.productName}: $e');
+        }
+      }
+
+      if (mounted) _showResultDialog(imported, updated, skipped, movementsImported, priceChangesImported, [...result.errors, ...importErrors]);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import failed: $e')));
     } finally {
@@ -241,7 +211,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _showResultDialog(int imported, int updated, int skipped, List<String> errors) {
+  void _showResultDialog(int imported, int updated, int skipped, int movementsImported, int priceChangesImported, List<String> errors) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -261,6 +231,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Icon(Icons.edit, color: Colors.blue, size: 20),
                 const SizedBox(width: 8),
                 Text('$updated products updated'),
+              ]),
+            ],
+            if (movementsImported > 0) ...[
+              const SizedBox(height: 8),
+              Row(children: [
+                const Icon(Icons.swap_vert, color: Colors.teal, size: 20),
+                const SizedBox(width: 8),
+                Text('$movementsImported stock movements imported'),
+              ]),
+            ],
+            if (priceChangesImported > 0) ...[
+              const SizedBox(height: 8),
+              Row(children: [
+                const Icon(Icons.trending_up, color: Colors.purple, size: 20),
+                const SizedBox(width: 8),
+                Text('$priceChangesImported price changes imported'),
               ]),
             ],
             if (skipped > 0) ...[

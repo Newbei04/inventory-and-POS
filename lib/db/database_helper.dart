@@ -32,7 +32,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'inventory_scanner.db');
     return openDatabase(
       path,
-      version: 8,
+      version: 10,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE products (
@@ -93,6 +93,20 @@ class DatabaseHelper {
             try {
               await db.execute(
                 "ALTER TABLE receipts ADD COLUMN is_voided INTEGER NOT NULL DEFAULT 0",
+              );
+            } catch (_) {}
+          }
+          if (oldVersion < 9) {
+            try {
+              await db.execute(
+                "ALTER TABLE receipts ADD COLUMN is_refunded INTEGER NOT NULL DEFAULT 0",
+              );
+            } catch (_) {}
+          }
+          if (oldVersion < 10) {
+            try {
+              await db.execute(
+                "ALTER TABLE receipts ADD COLUMN refunded_items_json TEXT NOT NULL DEFAULT '[]'",
               );
             } catch (_) {}
           }
@@ -197,6 +211,8 @@ class DatabaseHelper {
         cash REAL NOT NULL,
         change REAL NOT NULL,
         is_voided INTEGER NOT NULL DEFAULT 0,
+        is_refunded INTEGER NOT NULL DEFAULT 0,
+        refunded_items_json TEXT NOT NULL DEFAULT '[]',
         items_json TEXT NOT NULL,
         date TEXT NOT NULL
       )
@@ -245,6 +261,65 @@ class DatabaseHelper {
       }
     });
     return restored;
+  }
+
+  /// Refund selected items from a receipt. [itemIndices] = null means all.
+  /// Returns items that could NOT be fully refunded (inadequate stock).
+  Future<List<Map<String, dynamic>>> refundReceipt(int receiptId, {List<int>? itemIndices}) async {
+    final db = await database;
+    final inadequate = <Map<String, dynamic>>[];
+    await db.transaction((txn) async {
+      final rows = await txn.query('receipts', where: 'id = ?', whereArgs: [receiptId], limit: 1);
+      if (rows.isEmpty) return;
+      final receipt = Receipt.fromMap(rows.first);
+      if (receipt.isVoided) return;
+      final alreadyRefunded = receipt.refundedItemIndices;
+      final toRefund = itemIndices ?? List.generate(receipt.items.length, (i) => i);
+      final newlyRefunded = <int>{...alreadyRefunded};
+      for (final idx in toRefund) {
+        if (idx < 0 || idx >= receipt.items.length) continue;
+        if (alreadyRefunded.contains(idx)) continue;
+        final item = receipt.items[idx];
+        final product = await txn.query('products', where: 'id = ?', whereArgs: [item.productId], limit: 1);
+        if (product.isEmpty) {
+          inadequate.add({'name': item.productName, 'sold': item.quantity, 'available': 0});
+          newlyRefunded.add(idx);
+          continue;
+        }
+        final currentQty = (product.first['quantity'] as int?) ?? 0;
+        final refundQty = currentQty >= item.quantity ? item.quantity : currentQty;
+        final newQty = currentQty - refundQty;
+        await txn.update('products', {
+          'quantity': newQty,
+          'date_updated': DateTime.now().toIso8601String(),
+        }, where: 'id = ?', whereArgs: [item.productId]);
+        await txn.insert('stock_movements', {
+          'product_id': item.productId,
+          'product_name': item.productName,
+          'old_quantity': currentQty,
+          'new_quantity': newQty,
+          'delta': -refundQty,
+          'type': 'refund',
+          'reason': 'Refund receipt #${receipt.receiptNo}',
+          'date': DateTime.now().toIso8601String(),
+        });
+        if (refundQty < item.quantity) {
+          inadequate.add({
+            'name': item.productName,
+            'sold': item.quantity,
+            'available': currentQty,
+            'refunded': refundQty,
+          });
+        }
+        newlyRefunded.add(idx);
+      }
+      final allRefunded = newlyRefunded.length >= receipt.items.length;
+      await txn.update('receipts', {
+        if (allRefunded) 'is_refunded': 1,
+        'refunded_items_json': jsonEncode(newlyRefunded.toList()),
+      }, where: 'id = ?', whereArgs: [receiptId]);
+    });
+    return inadequate;
   }
 
   Future<List<Receipt>> getAllReceipts({int? limit}) async {
@@ -305,7 +380,7 @@ class DatabaseHelper {
     final receipts = await getAllReceipts();
     final aggregated = <String, Map<String, dynamic>>{};
     for (final r in receipts) {
-      if (r.isVoided) continue;
+      if (r.isVoided || r.isFullyRefunded) continue;
       for (final item in r.items) {
         aggregated.putIfAbsent(item.productName, () => {
           'product_name': item.productName,

@@ -46,9 +46,14 @@ class Receipt {
   double change;
   String date;
   bool isVoided;
+  bool isRefunded;
+  List<int> refundedItemIndices;
   List<ReceiptItem> items;
 
   int get totalItemsQty => items.fold(0, (sum, i) => sum + i.quantity);
+  bool get isFullyRefunded => isRefunded && refundedItemIndices.length >= items.length;
+  bool get isPartiallyRefunded => refundedItemIndices.isNotEmpty && !isFullyRefunded;
+  bool get canModify => !isVoided && !isFullyRefunded;
 
   Receipt({
     this.id,
@@ -60,6 +65,8 @@ class Receipt {
     required this.change,
     required this.date,
     this.isVoided = false,
+    this.isRefunded = false,
+    this.refundedItemIndices = const [],
     required this.items,
   });
 
@@ -72,6 +79,8 @@ class Receipt {
     'change': change,
     'date': date,
     'is_voided': isVoided ? 1 : 0,
+    'is_refunded': isRefunded ? 1 : 0,
+    'refunded_items_json': jsonEncode(refundedItemIndices),
     'items_json': jsonEncode(items.map((i) => i.toMap()).toList()),
   };
 
@@ -90,6 +99,11 @@ class Receipt {
       change: (m['change'] ?? 0).toDouble(),
       date: m['date'],
       isVoided: (m['is_voided'] ?? 0) == 1,
+      isRefunded: (m['is_refunded'] ?? 0) == 1,
+      refundedItemIndices: (() {
+        final raw = m['refunded_items_json'] as String? ?? '[]';
+        return (jsonDecode(raw) as List).map((e) => e as int).toList();
+      })(),
       items: itemsList,
     );
   }

@@ -22,7 +22,7 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
   bool _loading = true;
   ReceiptPeriod _period = ReceiptPeriod.all;
   DateTimeRange? _customRange;
-  int _statusFilter = 0; // 0=All, 1=Active, 2=Voided
+  int _statusFilter = 0; // 0=All, 1=Active, 2=Voided, 3=Refunded
 
   @override
   void initState() {
@@ -95,9 +95,11 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
 
     // Status filter
     if (_statusFilter == 1) {
-      filtered = filtered.where((r) => !r.isVoided).toList();
+      filtered = filtered.where((r) => !r.isVoided && !r.isRefunded).toList();
     } else if (_statusFilter == 2) {
       filtered = filtered.where((r) => r.isVoided).toList();
+    } else if (_statusFilter == 3) {
+      filtered = filtered.where((r) => r.isRefunded || r.isPartiallyRefunded).toList();
     }
 
     if (!mounted) return;
@@ -203,6 +205,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                 _statusChip('Active', 1, Icons.check_circle_outline, Colors.green),
                 const SizedBox(width: 6),
                 _statusChip('Voided', 2, Icons.cancel_outlined, Colors.red),
+                const SizedBox(width: 6),
+                _statusChip('Refunded', 3, Icons.replay, Colors.orange),
               ],
             ),
           ),
@@ -368,9 +372,11 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
 
   Widget _receiptCard(Receipt r) {
     final dateStr = _formatDate(r.date);
+    final isRefunded = r.isFullyRefunded;
+    final isPartialRefund = r.isPartiallyRefunded;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      color: r.isVoided ? Colors.red.shade50 : null,
+      color: r.isVoided ? Colors.red.shade50 : isRefunded ? Colors.orange.shade50 : isPartialRefund ? Colors.orange.shade50 : null,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () => _viewReceipt(r),
@@ -381,12 +387,12 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: r.isVoided ? Colors.red.shade50 : Colors.blue.shade50,
+                  color: r.isVoided ? Colors.red.shade50 : isRefunded ? Colors.orange.shade50 : Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  r.isVoided ? Icons.cancel_outlined : Icons.receipt_long,
-                  color: r.isVoided ? Colors.red.shade400 : Colors.blue.shade600,
+                  r.isVoided ? Icons.cancel_outlined : (isRefunded || isPartialRefund) ? Icons.replay : Icons.receipt_long,
+                  color: r.isVoided ? Colors.red.shade400 : (isRefunded || isPartialRefund) ? Colors.orange.shade600 : Colors.blue.shade600,
                   size: 24,
                 ),
               ),
@@ -422,6 +428,24 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                             ),
                           ),
                         ],
+                        if (isRefunded || isPartialRefund) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade100,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              isRefunded ? 'REFUNDED' : 'PARTIAL',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.orange.shade700,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -443,8 +467,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      color: r.isVoided ? Colors.red.shade400 : Colors.blue.shade700,
-                      decoration: r.isVoided ? TextDecoration.lineThrough : null,
+                      color: r.isVoided ? Colors.red.shade400 : isRefunded ? Colors.orange.shade600 : Colors.blue.shade700,
+                      decoration: r.isVoided || isRefunded ? TextDecoration.lineThrough : null,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -465,6 +489,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
   }
 
   void _viewReceipt(Receipt r) {
+    final canAct = r.canModify && DateTime.now().difference(DateTime.parse(r.date)).inHours < 24;
+    final selectedItems = <int>{};
     showDialog(
       context: context,
       useSafeArea: false,
@@ -502,37 +528,110 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                           ),
                         ),
                         const SizedBox(height: 20),
-                        ...r.items.map(
-                          (item) => Padding(
+                        if (canAct && selectedItems.isNotEmpty)
+                          Padding(
                             padding: const EdgeInsets.only(bottom: 10),
-                            child: Column(
-                              children: [
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        item.productName,
-                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                                      ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.orange.shade200),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.info_outline, size: 16, color: Colors.orange.shade700),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      '${selectedItems.length} item${selectedItems.length == 1 ? '' : 's'} selected for refund',
+                                      style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
                                     ),
-                                    Text(
-                                      '₱${item.total.toStringAsFixed(2)}',
-                                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 2),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    '${item.quantity} × ₱${item.price.toStringAsFixed(2)}',
-                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
+                        ...r.items.asMap().entries.map(
+                          (entry) {
+                            final idx = entry.key;
+                            final item = entry.value;
+                            final alreadyRefunded = r.refundedItemIndices.contains(idx);
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      if (canAct && !alreadyRefunded)
+                                        Padding(
+                                          padding: const EdgeInsets.only(right: 8, top: 1),
+                                          child: Checkbox(
+                                            value: selectedItems.contains(idx),
+                                            onChanged: (v) {
+                                              setDialogState(() {
+                                                if (v == true) {
+                                                  selectedItems.add(idx);
+                                                } else {
+                                                  selectedItems.remove(idx);
+                                                }
+                                              });
+                                            },
+                                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                            visualDensity: VisualDensity.compact,
+                                          ),
+                                        ),
+                                      if (alreadyRefunded)
+                                        Padding(
+                                          padding: const EdgeInsets.only(right: 8, top: 2),
+                                          child: Icon(Icons.check_circle, size: 18, color: Colors.orange.shade500),
+                                        ),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    item.productName,
+                                                    style: TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight: FontWeight.w500,
+                                                      decoration: alreadyRefunded ? TextDecoration.lineThrough : null,
+                                                      color: alreadyRefunded ? Colors.grey : null,
+                                                    ),
+                                                  ),
+                                                ),
+                                                Text(
+                                                  '₱${item.total.toStringAsFixed(2)}',
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 14,
+                                                    decoration: alreadyRefunded ? TextDecoration.lineThrough : null,
+                                                    color: alreadyRefunded ? Colors.grey : null,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              '${item.quantity} × ₱${item.price.toStringAsFixed(2)}${alreadyRefunded ? '  (refunded)' : ''}',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: alreadyRefunded ? Colors.orange.shade500 : Colors.grey.shade500,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
                         const Divider(height: 20),
                         Row(
@@ -544,8 +643,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 20,
-                                decoration: r.isVoided ? TextDecoration.lineThrough : null,
-                                color: r.isVoided ? Colors.red : null,
+                                decoration: r.isVoided || r.isFullyRefunded ? TextDecoration.lineThrough : null,
+                                color: r.isVoided ? Colors.red : r.isFullyRefunded ? Colors.orange : null,
                               ),
                             ),
                           ],
@@ -587,37 +686,7 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                           style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontFamily: 'monospace'),
                         ),
                         const SizedBox(height: 20),
-                        if (!r.isVoided)
-                          if (DateTime.now().difference(DateTime.parse(r.date)).inHours < 24)
-                            SizedBox(
-                              width: double.infinity,
-                              height: 48,
-                              child: OutlinedButton.icon(
-                                icon: const Icon(Icons.cancel_outlined, size: 20),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.red,
-                                  side: BorderSide(color: Colors.red.shade300),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                                onPressed: () => _confirmVoid(ctx, r, setDialogState),
-                                label: const Text('Void Receipt', style: TextStyle(fontSize: 15)),
-                              ),
-                            )
-                          else
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                'Void window expired (24h limit)',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
-                              ),
-                            )
-                        else
+                        if (r.isVoided)
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -630,6 +699,66 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                               'This receipt has been voided',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.w600),
+                            ),
+                          )
+                        else if (r.isFullyRefunded)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange.shade200),
+                            ),
+                            child: Text(
+                              'This receipt has been fully refunded',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.orange.shade700, fontWeight: FontWeight.w600),
+                            ),
+                          )
+                        else if (canAct) ...[
+                          if (selectedItems.isNotEmpty)
+                            SizedBox(
+                              width: double.infinity,
+                              height: 48,
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.replay, size: 20),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.orange,
+                                  side: BorderSide(color: Colors.orange.shade300),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                onPressed: () => _confirmRefund(ctx, r, setDialogState, itemIndices: selectedItems.toList()),
+                                label: Text('Refund ${selectedItems.length} Item${selectedItems.length == 1 ? '' : 's'}', style: const TextStyle(fontSize: 15)),
+                              ),
+                            ),
+                          if (selectedItems.isNotEmpty) const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.cancel_outlined, size: 20),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.red,
+                                side: BorderSide(color: Colors.red.shade300),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              onPressed: () => _confirmVoid(ctx, r, setDialogState),
+                              label: const Text('Void Receipt', style: TextStyle(fontSize: 15)),
+                            ),
+                          ),
+                        ] else
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              'Action window expired (24h limit)',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
                             ),
                           ),
                         const SizedBox(height: 10),
@@ -645,7 +774,7 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                     ),
                   ),
                 ),
-                if (r.isVoided)
+                if (r.isVoided || r.isFullyRefunded)
                   Positioned.fill(
                     child: IgnorePointer(
                       child: Center(
@@ -654,16 +783,19 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
                             decoration: BoxDecoration(
-                              border: Border.all(color: Colors.red.shade400, width: 4),
+                              border: Border.all(
+                                color: r.isVoided ? Colors.red.shade400 : Colors.orange.shade400,
+                                width: 4,
+                              ),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              'VOID',
+                              r.isVoided ? 'VOID' : 'REFUNDED',
                               style: TextStyle(
-                                fontSize: 48,
+                                fontSize: 42,
                                 fontWeight: FontWeight.w900,
-                                color: Colors.red.shade300,
-                                letterSpacing: 8,
+                                color: r.isVoided ? Colors.red.shade300 : Colors.orange.shade300,
+                                letterSpacing: 6,
                               ),
                             ),
                           ),
@@ -710,6 +842,63 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
             backgroundColor: Colors.orange.shade700,
           ),
         );
+      }
+    }
+  }
+
+  Future<void> _confirmRefund(BuildContext ctx, Receipt r, StateSetter setDialogState, {List<int>? itemIndices}) async {
+    final isPartial = itemIndices != null && itemIndices.length < r.items.length;
+    final count = itemIndices?.length ?? r.items.length;
+    final confirm = await showDialog<bool>(
+      context: ctx,
+      builder: (dCtx) => AlertDialog(
+        icon: const Icon(Icons.replay, color: Colors.orange, size: 40),
+        title: Text(isPartial ? 'Refund $count Item${count == 1 ? '' : 's'}?' : 'Refund Receipt?'),
+        content: Text(
+          isPartial
+              ? 'This will refund $count item(s) from receipt #${r.receiptNo} and deduct stock. Other items will remain unchanged.'
+              : 'This will refund receipt #${r.receiptNo} and deduct all ${r.totalItemsQty} unit(s) from inventory. Items with inadequate stock will be partially refunded.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.orange),
+            child: const Text('Refund'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true && ctx.mounted) {
+      final inadequate = await _db.refundReceipt(r.id!, itemIndices: itemIndices);
+      if (!ctx.mounted) return;
+      Navigator.pop(ctx);
+      _load();
+      if (mounted) {
+        if (inadequate.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(isPartial
+                  ? '$count item(s) refunded — stock deducted'
+                  : 'Receipt #${r.receiptNo} refunded — stock deducted'),
+              backgroundColor: Colors.orange.shade700,
+            ),
+          );
+        } else {
+          final names = inadequate.map((i) {
+            final refundedQty = i['refunded'] as int? ?? 0;
+            final sold = i['sold'] as int;
+            if (refundedQty == 0) return '${i['name']} (0/$sold)';
+            return '${i['name']} ($refundedQty/$sold)';
+          }).join(', ');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Partial refund: $names'),
+              backgroundColor: Colors.orange.shade900,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
       }
     }
   }

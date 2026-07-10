@@ -56,7 +56,12 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
         _loadingPrices = false;
       });
     } catch (e) {
-      if (mounted) setState(() => _loadingPrices = false);
+      if (mounted) {
+        setState(() => _loadingPrices = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load price logs: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 

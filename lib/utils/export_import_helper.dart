@@ -187,6 +187,7 @@ class ExportImportHelper {
       ]);
     }
 
+    excel.delete('Sheet1');
     final bytes = excel.encode();
     if (bytes == null) throw Exception('Failed to encode Excel file');
     final path = await _saveFile('products_export', 'xlsx', bytes);
@@ -304,6 +305,7 @@ class ExportImportHelper {
       ]);
     }
 
+    excel.delete('Sheet1');
     final bytes = excel.encode();
     if (bytes == null) throw Exception('Failed to encode Excel file');
     final path = await _saveFile('inventory_export', 'xlsx', bytes);
@@ -407,6 +409,7 @@ class ExportImportHelper {
       ]);
     }
 
+    excel.delete('Sheet1');
     final bytes = excel.encode();
     if (bytes == null) throw Exception('Failed to encode Excel file');
     final path = await _saveFile('stock_movements_export', 'xlsx', bytes);
@@ -441,6 +444,7 @@ class ExportImportHelper {
       ]);
     }
 
+    excel.delete('Sheet1');
     final bytes = excel.encode();
     if (bytes == null) throw Exception('Failed to encode Excel file');
     final path = await _saveFile('price_changes_export', 'xlsx', bytes);
@@ -491,7 +495,6 @@ class ExportImportHelper {
 
   /// Generate a template CSV file and save it to the downloads directory.
   static Future<String> downloadTemplate() async {
-    final dir = await getExportsDir();
     final rows = <List<dynamic>>[
       [
         'barcode', 'name', 'category', 'price', 'cost',
@@ -503,9 +506,7 @@ class ExportImportHelper {
       ],
     ];
     final csv = const ListToCsvConverter().convert(rows);
-    final file = File(p.join(dir.path, 'import_template.csv'));
-    file.writeAsStringSync(csv);
-    return file.path;
+    return _saveFileFromString('import_template', 'csv', csv);
   }
 
   static Directory? _imageDir;

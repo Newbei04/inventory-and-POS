@@ -117,63 +117,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _exportProducts() async {
-    final format = await _pickFormat();
-    if (format == null) return;
-    setState(() => _loading = true);
-    try {
-      final products = await _db.getAllProducts();
-      if (products.isEmpty) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No products to export')));
-        return;
-      }
-      final path = await ExportImportHelper.exportProducts(products: products, format: format);
-      if (mounted) _showExportSuccess(path);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _exportStockMovements() async {
-    final format = await _pickFormat();
-    if (format == null) return;
-    setState(() => _loading = true);
-    try {
-      final movements = await _db.getStockMovements();
-      if (movements.isEmpty) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No stock movements to export')));
-        return;
-      }
-      final path = await ExportImportHelper.exportStockMovements(movements: movements, format: format);
-      if (mounted) _showExportSuccess(path);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _exportPriceChanges() async {
-    final format = await _pickFormat();
-    if (format == null) return;
-    setState(() => _loading = true);
-    try {
-      final changes = await _db.getPriceChangeList();
-      if (changes.isEmpty) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No price changes to export')));
-        return;
-      }
-      final path = await ExportImportHelper.exportPriceChanges(changes: changes, format: format);
-      if (mounted) _showExportSuccess(path);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
   Future<void> _exportAll() async {
     setState(() => _loading = true);
     try {
@@ -517,40 +460,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
-                          onPressed: _exportProducts,
-                          icon: const Icon(Icons.inventory_2),
-                          label: const Text('Export Products'),
-                          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _exportStockMovements,
-                          icon: const Icon(Icons.history),
-                          label: const Text('Export Stock Movements'),
-                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _exportPriceChanges,
-                          icon: const Icon(Icons.trending_up),
-                          label: const Text('Export Price Changes'),
-                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.tonalIcon(
                           onPressed: _exportAll,
-                          icon: const Icon(Icons.grid_on),
-                          label: const Text('Export All (Excel - Multi-sheet)'),
-                          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                          icon: const Icon(Icons.download),
+                          label: const Text('Export'),
+                          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
                         ),
                       ),
                     ],

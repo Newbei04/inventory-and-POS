@@ -5,7 +5,9 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../db/database_helper.dart';
 import '../models/product.dart';
+import '../utils/scan_beep.dart';
 import '../utils/usb_scanner_service.dart';
+import '../widgets/scanner_mode_sheet.dart';
 
 enum _ScannerMode { camera, external }
 
@@ -38,7 +40,20 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
   @override
   void initState() {
     super.initState();
-    _scannerController.start();
+    _loadDefaultScanner();
+  }
+
+  Future<void> _loadDefaultScanner() async {
+    final mode = await _db.getSetting('default_scan_mode');
+    if (!mounted) return;
+    final targetMode = mode == 'external'
+        ? _ScannerMode.external
+        : _ScannerMode.camera;
+    if (targetMode != _mode) {
+      await _setMode(targetMode);
+    } else if (_mode == _ScannerMode.camera) {
+      _scannerController.start();
+    }
   }
 
   @override
@@ -84,12 +99,14 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
     if (barcodes.isEmpty) return;
     final value = barcodes.first.rawValue;
     if (value == null || value.isEmpty || value == _lastBarcode) return;
+    ScanBeep.play();
     _lookup(value);
   }
 
   void _onScannerBarcode(String value) {
     final trimmed = value.trim();
     if (trimmed.isEmpty || _loading || trimmed == _lastBarcode) return;
+    ScanBeep.play();
     _lookup(trimmed);
   }
 
@@ -160,13 +177,25 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
     });
   }
 
+  Future<void> _showScannerMode() async {
+    final result = await showScannerModeSheet(
+      context,
+      isExternal: _mode == _ScannerMode.external,
+    );
+    if (result == null || !mounted) return;
+    final targetMode = result == ScannerChoice.external
+        ? _ScannerMode.external
+        : _ScannerMode.camera;
+    await _setMode(targetMode);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(_mode == _ScannerMode.camera
             ? 'Price Check'
-            :             'Price Check — USB Scanner'),
+            : 'Price Check — USB Scanner'),
         centerTitle: true,
         actions: [
           if (_mode == _ScannerMode.camera) ...[
@@ -181,39 +210,10 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
               onPressed: _toggleTorch,
             ),
           ],
-          PopupMenuButton<_ScannerMode>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: _setMode,
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: _ScannerMode.camera,
-                child: Row(
-                  children: [
-                    Icon(Icons.qr_code_scanner,
-                        color: _mode == _ScannerMode.camera
-                            ? Colors.blue
-                            : null,
-                        size: 20),
-                    const SizedBox(width: 12),
-                    const Text('Camera Scanner'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: _ScannerMode.external,
-                child: Row(
-                  children: [
-                    Icon(Icons.usb,
-                        color: _mode == _ScannerMode.external
-                            ? Colors.blue
-                            : null,
-                        size: 20),
-                    const SizedBox(width: 12),
-                    const Text('USB Scanner'),
-                  ],
-                ),
-              ),
-            ],
+          IconButton(
+            icon: const Icon(Icons.tune_rounded),
+            tooltip: 'Scanner settings',
+            onPressed: _showScannerMode,
           ),
         ],
       ),

@@ -12,6 +12,7 @@ import 'price_check_v2_screen.dart';
 import 'pos_screen.dart';
 import 'receipts_screen.dart';
 import 'reports_screen.dart';
+import 'update_price_screen.dart';
 
 
 class DashboardScreen extends StatefulWidget {
@@ -33,6 +34,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<StockMovement> _recentMovements = [];
   bool _loading = true;
   bool _loadInProgress = false;
+  String _storeName = '';
+  bool _salesHidden = false;
 
   @override
   void initState() {
@@ -54,6 +57,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _db.getLowStockProducts(),
         _db.getCategories(),
         _db.getStockMovements(limit: 8),
+        _db.getSetting('store_name'),
       ]);
       if (!mounted) return;
       setState(() {
@@ -64,6 +68,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _lowStock = results[4] as List<Product>;
         _categories = results[5] as List<String>;
         _recentMovements = results[6] as List<StockMovement>;
+        _storeName = results[7] as String? ?? '';
         _loading = false;
       });
     } catch (e) {
@@ -148,6 +153,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_storeName.isNotEmpty) ...[
+            Text(
+              _storeName,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.9),
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           Row(
             children: [
               Container(
@@ -168,11 +184,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   fontWeight: FontWeight.w500,
                 ),
               ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => setState(() => _salesHidden = !_salesHidden),
+                child: Icon(
+                  _salesHidden ? Icons.visibility_off : Icons.visibility,
+                  color: Colors.white.withValues(alpha: 0.7),
+                  size: 20,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
           Text(
-            '₱${_totalSales.toStringAsFixed(2)}',
+            _salesHidden ? '₱••••••' : '₱${_totalSales.toStringAsFixed(2)}',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 34,
@@ -324,7 +349,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: _actionCard(
                 icon: Icons.qr_code_scanner,
                 label: 'Price Check',
-                subtitle: 'Auto-scan & display',
                 color: Colors.indigo,
                 bgColor: Colors.indigo.shade50,
                 onTap: () => Navigator.push(
@@ -333,12 +357,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 4),
             Expanded(
               child: _actionCard(
                 icon: Icons.inventory_2,
                 label: 'Inventory',
-                subtitle: 'Manage stock levels',
                 color: Colors.green,
                 bgColor: Colors.green.shade50,
                 onTap: () => Navigator.push(
@@ -347,16 +370,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
+            const SizedBox(width: 4),
             Expanded(
               child: _actionCard(
                 icon: Icons.receipt_long,
                 label: 'Receipts',
-                subtitle: 'View sales history',
                 color: Colors.blue,
                 bgColor: Colors.blue.shade50,
                 onTap: () => Navigator.push(
@@ -365,12 +383,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
             Expanded(
               child: _actionCard(
                 icon: Icons.bar_chart,
                 label: 'Reports',
-                subtitle: 'Sales & inventory',
                 color: Colors.teal,
                 bgColor: Colors.teal.shade50,
                 onTap: () => Navigator.push(
@@ -379,19 +400,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: _actionCard(
+                icon: Icons.qr_code_scanner,
+                label: 'Inventory Count',
+                color: Colors.deepPurple,
+                bgColor: Colors.deepPurple.shade50,
+                onTap: () => Navigator.push(
+                  context,
+                  slideIn(const InventoryV2Screen()),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: _actionCard(
+                icon: Icons.attach_money,
+                label: 'Update Price',
+                color: Colors.amber,
+                bgColor: Colors.amber.shade50,
+                onTap: () => Navigator.push(
+                  context,
+                  slideIn(const UpdatePriceScreen()),
+                ),
+              ),
+            ),
           ],
-        ),
-        const SizedBox(height: 12),
-        _actionCard(
-          icon: Icons.qr_code_scanner,
-          label: 'Inventory Count',
-          subtitle: 'Scan barcodes and enter physical count',
-          color: Colors.deepPurple,
-          bgColor: Colors.deepPurple.shade50,
-          onTap: () => Navigator.push(
-            context,
-            slideIn(const InventoryV2Screen()),
-          ),
         ),
       ],
     );
@@ -400,7 +435,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _actionCard({
     required IconData icon,
     required String label,
-    required String subtitle,
     required Color color,
     required Color bgColor,
     required VoidCallback onTap,
@@ -410,32 +444,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
           child: Column(
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: bgColor,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: color, size: 28),
+                child: Icon(icon, color: color, size: 22),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
               Text(
                 label,
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
-                  fontSize: 15,
+                  fontSize: 12,
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey.shade600,
-                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),

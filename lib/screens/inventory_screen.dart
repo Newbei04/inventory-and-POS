@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../db/database_helper.dart';
 import '../models/product.dart';
+import '../widgets/scanner_mode_sheet.dart';
+import 'scan_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -20,11 +22,18 @@ class _InventoryScreenState extends State<InventoryScreen> {
   bool _loading = true;
   String _searchQuery = '';
   Timer? _debounce;
+  bool _useExternalScanner = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadScannerDefault();
+  }
+
+  Future<void> _loadScannerDefault() async {
+    final mode = await _db.getSetting('default_scan_mode');
+    if (mounted) setState(() => _useExternalScanner = mode == 'external');
   }
 
   @override
@@ -60,6 +69,69 @@ class _InventoryScreenState extends State<InventoryScreen> {
     _searchCtrl.clear();
     _searchQuery = '';
     _load();
+  }
+
+  void _showStockOptions(Product product) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                child: Text(
+                  product.name,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                'Current stock: ${product.quantity} ${product.unit}',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.add_circle_outline, color: Colors.green.shade600),
+                ),
+                title: const Text('Add Stock', style: TextStyle(fontWeight: FontWeight.w500)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _addStock(product);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.remove_circle_outline, color: Colors.orange.shade600),
+                ),
+                title: const Text('Remove Stock', style: TextStyle(fontWeight: FontWeight.w500)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _removeStock(product);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _addStock(Product product) async {
@@ -105,6 +177,50 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
   }
 
+  Future<void> _removeStock(Product product) async {
+    if (product.id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This product is missing an ID and can\'t be updated'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final result = await showDialog<_RemoveResult>(
+      context: context,
+      builder: (_) => _RemoveStockDialog(product: product),
+    );
+
+    if (result == null || !mounted) return;
+
+    try {
+      await _db.adjustStock(product.id!, -result.quantity, reason: result.reason.label, type: 'remove');
+      if (!mounted) return;
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Removed ${result.quantity} ${product.unit}(s) from ${product.name} (${result.reason.label})'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Colors.orange.shade700,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Couldn\'t update stock: $e'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Colors.red.shade600,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _placeholder(bool lowStock) {
     return Container(
       padding: const EdgeInsets.all(10),
@@ -120,6 +236,36 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  void _scanBarcode() async {
+    final mode = _useExternalScanner ? ScanMode.external : ScanMode.camera;
+    final barcode = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScanScreen(title: 'Scan Product', initialMode: mode),
+      ),
+    );
+    if (barcode == null || !mounted) return;
+    final product = await _db.getProductByBarcode(barcode);
+    if (product == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No product found for: $barcode')),
+        );
+      }
+      return;
+    }
+    _showStockOptions(product);
+  }
+
+  Future<void> _showScannerMode() async {
+    final result = await showScannerModeSheet(
+      context,
+      isExternal: _useExternalScanner,
+    );
+    if (result == null || !mounted) return;
+    setState(() => _useExternalScanner = result == ScannerChoice.external);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -127,6 +273,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
         title: const Text('Inventory'),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.tune_rounded),
+            tooltip: 'Scanner settings',
+            onPressed: _showScannerMode,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _load,
@@ -137,19 +288,29 @@ class _InventoryScreenState extends State<InventoryScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
-                hintText: 'Search products...',
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _searchCtrl.text.isNotEmpty
-                    ? IconButton(
-                  icon: const Icon(Icons.clear, size: 18),
-                  onPressed: _clearSearch,
-                )
-                    : null,
-              ),
-              onChanged: _onSearch,
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Search products...',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      suffixIcon: _searchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: _clearSearch,
+                            )
+                          : IconButton(
+                              icon: const Icon(Icons.qr_code_scanner, size: 18),
+                              onPressed: _scanBarcode,
+                              tooltip: 'Scan barcode',
+                            ),
+                    ),
+                    onChanged: _onSearch,
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -199,7 +360,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       margin: const EdgeInsets.only(bottom: 6),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => _addStock(p),
+        onTap: () => _showStockOptions(p),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
@@ -369,6 +530,189 @@ class _AddStockDialogState extends State<_AddStockDialog> {
             Navigator.pop(context, v);
           },
           child: const Text('Add'),
+        ),
+      ],
+    );
+  }
+}
+
+enum RemoveReason {
+  expired,
+  defective,
+  destroyed,
+  adjustment;
+
+  String get label {
+    switch (this) {
+      case RemoveReason.expired:
+        return 'Expired';
+      case RemoveReason.defective:
+        return 'Defective';
+      case RemoveReason.destroyed:
+        return 'Destroyed';
+      case RemoveReason.adjustment:
+        return 'Adjustment';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case RemoveReason.expired:
+        return Icons.event_busy;
+      case RemoveReason.defective:
+        return Icons.bug_report;
+      case RemoveReason.destroyed:
+        return Icons.delete_forever;
+      case RemoveReason.adjustment:
+        return Icons.tune;
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case RemoveReason.expired:
+        return Colors.red;
+      case RemoveReason.defective:
+        return Colors.orange;
+      case RemoveReason.destroyed:
+        return Colors.deepPurple;
+      case RemoveReason.adjustment:
+        return Colors.blueGrey;
+    }
+  }
+}
+
+class _RemoveResult {
+  final int quantity;
+  final RemoveReason reason;
+  const _RemoveResult(this.quantity, this.reason);
+}
+
+class _RemoveStockDialog extends StatefulWidget {
+  final Product product;
+  const _RemoveStockDialog({required this.product});
+
+  @override
+  State<_RemoveStockDialog> createState() => _RemoveStockDialogState();
+}
+
+class _RemoveStockDialogState extends State<_RemoveStockDialog> {
+  final _ctrl = TextEditingController();
+  RemoveReason? _reason;
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text('Remove stock — ${widget.product.name}'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Text('Current stock: ',
+                  style: TextStyle(fontSize: 13, color: Colors.grey)),
+              Text('${widget.product.quantity} ${widget.product.unit}',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _ctrl,
+            keyboardType: TextInputType.number,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Quantity to remove',
+              prefixIcon: const Icon(Icons.remove_circle_outline),
+              errorText: _errorText,
+            ),
+            onChanged: (_) {
+              if (_errorText != null) {
+                setState(() => _errorText = null);
+              }
+            },
+          ),
+          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Reason',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: RemoveReason.values.map((r) {
+              final selected = _reason == r;
+              return ChoiceChip(
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(r.icon, size: 14, color: selected ? Colors.white : r.color),
+                    const SizedBox(width: 4),
+                    Text(r.label),
+                  ],
+                ),
+                selected: selected,
+                selectedColor: r.color,
+                backgroundColor: r.color.withValues(alpha: 0.08),
+                labelStyle: TextStyle(
+                  color: selected ? Colors.white : Colors.grey.shade800,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                ),
+                onSelected: (_) => setState(() {
+                  _reason = r;
+                  if (_errorText != null) _errorText = null;
+                }),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+          onPressed: () {
+            final v = int.tryParse(_ctrl.text.trim());
+            if (v == null || v <= 0) {
+              setState(() {
+                _errorText = 'Enter a whole number greater than 0';
+              });
+              return;
+            }
+            if (v > widget.product.quantity) {
+              setState(() {
+                _errorText = 'Cannot remove more than ${widget.product.quantity}';
+              });
+              return;
+            }
+            if (_reason == null) {
+              setState(() {
+                _errorText = 'Select a reason for removal';
+              });
+              return;
+            }
+            Navigator.pop(context, _RemoveResult(v, _reason!));
+          },
+          child: const Text('Remove'),
         ),
       ],
     );

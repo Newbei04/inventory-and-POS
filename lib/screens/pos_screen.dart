@@ -10,6 +10,8 @@ import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../models/receipt.dart';
 import '../utils/usb_scanner_service.dart';
+import '../utils/scan_beep.dart';
+import '../widgets/scanner_mode_sheet.dart';
 import '../widgets/store_receipt_header.dart';
 import 'scan_screen.dart';
 
@@ -40,12 +42,28 @@ class _PosScreenState extends State<PosScreen> {
   Timer? _searchDebounce;
   bool _scannerConnected = false;
   bool _checkingOut = false;
+  bool _useExternalScanner = false;
 
   @override
   void initState() {
     super.initState();
     _focusNode.requestFocus();
+    _loadScannerDefault();
     _startScanner();
+  }
+
+  Future<void> _loadScannerDefault() async {
+    final mode = await _db.getSetting('default_scan_mode');
+    if (mounted) setState(() => _useExternalScanner = mode == 'external');
+  }
+
+  Future<void> _showScannerMode() async {
+    final result = await showScannerModeSheet(
+      context,
+      isExternal: _useExternalScanner,
+    );
+    if (result == null || !mounted) return;
+    setState(() => _useExternalScanner = result == ScannerChoice.external);
   }
 
   @override
@@ -63,6 +81,7 @@ class _PosScreenState extends State<PosScreen> {
     _scannerSub?.cancel();
     _scannerSub = _scanner.barcodeStream.listen((barcode) {
       if (mounted) {
+        ScanBeep.play();
         setState(() => _scannerConnected = _scanner.isConnected);
         _addByBarcode(barcode, showQty: false);
       }
@@ -255,9 +274,18 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   Future<void> _scan() async {
-    final barcode = await ScanScreen.pickAndScan(
+    final db = DatabaseHelper.instance;
+    final savedMode = await db.getSetting('default_scan_mode');
+    if (!mounted) return;
+    final mode = savedMode == 'external' ? ScanMode.external : ScanMode.camera;
+    final barcode = await Navigator.push<String>(
       context,
-      title: 'Scan Item',
+      MaterialPageRoute(
+        builder: (_) => ScanScreen(
+          title: 'Scan Item',
+          initialMode: mode,
+        ),
+      ),
     );
     if (barcode != null && mounted) {
       _barcodeCtrl.text = barcode;
@@ -640,6 +668,11 @@ class _PosScreenState extends State<PosScreen> {
         ),
         centerTitle: false,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.tune_rounded),
+            tooltip: 'Scanner settings',
+            onPressed: _showScannerMode,
+          ),
           IconButton(
             icon: const Icon(Icons.search),
             tooltip: 'Search product',

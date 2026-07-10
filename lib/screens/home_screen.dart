@@ -7,6 +7,7 @@ import '../models/product.dart';
 import '../theme/app_theme.dart';
 import '../widgets/empty_state_widget.dart';
 import '../widgets/error_view_widget.dart';
+import '../widgets/scanner_mode_sheet.dart';
 import '../widgets/skeleton_widget.dart';
 import 'add_edit_product_screen.dart';
 import 'scan_screen.dart';
@@ -25,12 +26,19 @@ class _HomeScreenState extends State<HomeScreen> {
   List<String> _categories = [];
   String? _selectedCategory;
   bool _gridView = false;
+  bool _useExternalScanner = false;
 
   @override
   void initState() {
     super.initState();
     _loadCategories();
     _loadProducts();
+    _loadScannerDefault();
+  }
+
+  Future<void> _loadScannerDefault() async {
+    final mode = await _dbHelper.getSetting('default_scan_mode');
+    if (mounted) setState(() => _useExternalScanner = mode == 'external');
   }
 
   Future<void> _loadCategories() async {
@@ -121,7 +129,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _scanBarcode() async {
-    final barcode = await ScanScreen.pickAndScan(context);
+    final mode = _useExternalScanner ? ScanMode.external : ScanMode.camera;
+    final barcode = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScanScreen(
+          title: 'Scan Barcode',
+          initialMode: mode,
+        ),
+      ),
+    );
     if (barcode == null || !mounted) return;
     final existing = await _dbHelper.getProductByBarcode(barcode);
     if (mounted) {
@@ -142,6 +159,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _showScannerMode() async {
+    final result = await showScannerModeSheet(
+      context,
+      isExternal: _useExternalScanner,
+    );
+    if (result == null || !mounted) return;
+    setState(() => _useExternalScanner = result == ScannerChoice.external);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -155,9 +181,9 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => setState(() => _gridView = !_gridView),
           ),
           IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            tooltip: 'Scan barcode',
-            onPressed: _scanBarcode,
+            icon: const Icon(Icons.tune_rounded),
+            tooltip: 'Scanner settings',
+            onPressed: _showScannerMode,
           ),
         ],
       ),
@@ -165,22 +191,33 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search products...',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          _onSearchChanged('');
-                        },
-                      )
-                    : null,
-              ),
-              onChanged: _onSearchChanged,
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search products...',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 20),
+                              onPressed: () {
+                                _searchController.clear();
+                                _onSearchChanged('');
+                              },
+                            )
+                          : IconButton(
+                              icon: const Icon(Icons.qr_code_scanner, size: 20),
+                              onPressed: _scanBarcode,
+                              tooltip: 'Scan barcode',
+                            ),
+                    ),
+                    onChanged: _onSearchChanged,
+                    textInputAction: TextInputAction.search,
+                  ),
+                ),
+              ],
             ),
           ),
           if (_categories.isNotEmpty)
@@ -227,11 +264,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   onRefresh: () async => _loadProducts(),
                   child: _gridView
                       ? GridView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                          padding: const EdgeInsets.fromLTRB(8, 4, 8, 100),
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 2,
-                            mainAxisSpacing: 10,
-                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 4,
+                            crossAxisSpacing: 4,
                             childAspectRatio: 0.72,
                           ),
                           itemCount: products.length,
@@ -414,13 +451,13 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: () => _showProductDetail(product),
         onLongPress: () => _deleteProduct(product),
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.all(8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                   child: SizedBox(
                     width: double.infinity,
                     child: product.imagePath.isNotEmpty
@@ -433,7 +470,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Row(
                 children: [
                   Expanded(
@@ -441,7 +478,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       product.name,
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
-                        fontSize: 13,
+                        fontSize: 12,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -449,7 +486,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   if (isLowStock)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                       decoration: BoxDecoration(
                         color: Colors.red.shade50,
                         borderRadius: BorderRadius.circular(4),
@@ -457,7 +494,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Text(
                         'Low',
                         style: TextStyle(
-                          fontSize: 9,
+                          fontSize: 8,
                           color: Colors.red.shade600,
                           fontWeight: FontWeight.w600,
                         ),
@@ -465,20 +502,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Text(
                 '${AppText.peso}${product.price.toStringAsFixed(2)}',
-                style: AppText.price,
+                style: AppText.price.copyWith(fontSize: 13),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 1),
               Row(
                 children: [
-                  Icon(Icons.inventory_2, size: 12, color: Colors.grey.shade500),
-                  const SizedBox(width: 3),
+                  Icon(Icons.inventory_2, size: 10, color: Colors.grey.shade500),
+                  const SizedBox(width: 2),
                   Text(
                     '${product.quantity} ${product.unit}',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10,
                       color: isLowStock ? Colors.red.shade600 : Colors.grey.shade600,
                       fontWeight: isLowStock ? FontWeight.w600 : FontWeight.normal,
                     ),

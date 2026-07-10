@@ -21,6 +21,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _savingStore = false;
   String? _storeAddress;
   String? _storePhone;
+  String? _defaultScanMode;
 
   @override
   void initState() {
@@ -33,11 +34,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final image = await _db.getSetting('store_image_path');
     final address = await _db.getSetting('store_address');
     final phone = await _db.getSetting('store_phone');
+    final scanMode = await _db.getSetting('default_scan_mode');
     if (mounted) {
       _storeNameController.text = name ?? 'My Store';
       _storeImagePath = image;
       _storeAddress = address ?? '';
       _storePhone = phone ?? '';
+      _defaultScanMode = scanMode;
     }
   }
 
@@ -482,6 +485,98 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           label: const Text('Download Template'),
                           style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
                         ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // ── Default Scanner ──
+                _card(
+                  icon: Icons.qr_code_scanner,
+                  title: 'Default Scanner',
+                  subtitle: 'Skip the scan method picker',
+                  cs: cs,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _defaultScanMode == null
+                            ? 'No default set — you choose each time'
+                            : 'Default: ${_defaultScanMode == 'camera' ? 'Camera Scanner' : 'USB Scanner'}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: _defaultScanMode == null ? Colors.grey.shade600 : Colors.green.shade700,
+                          fontWeight: _defaultScanMode != null ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                await _db.setSetting('default_scan_mode', 'camera');
+                                if (!mounted) return;
+                                setState(() => _defaultScanMode = 'camera');
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Default set to Camera Scanner')),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.qr_code_scanner, size: 18),
+                              label: const Text('Camera'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                side: BorderSide(
+                                  color: _defaultScanMode == 'camera' ? Colors.blue : Colors.grey.shade300,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                await _db.setSetting('default_scan_mode', 'external');
+                                if (!mounted) return;
+                                setState(() => _defaultScanMode = 'external');
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Default set to USB Scanner')),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.usb, size: 18),
+                              label: const Text('USB'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                side: BorderSide(
+                                  color: _defaultScanMode == 'external' ? Colors.green : Colors.grey.shade300,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                            onPressed: _defaultScanMode != null
+                                ? () async {
+                                    await _db.setSetting('default_scan_mode', '');
+                                    if (!mounted) return;
+                                    setState(() => _defaultScanMode = null);
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Default removed — you will choose each time')),
+                                      );
+                                    }
+                                  }
+                                : null,
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                            ),
+                            child: const Icon(Icons.close, size: 18),
+                          ),
+                        ],
                       ),
                     ],
                   ),

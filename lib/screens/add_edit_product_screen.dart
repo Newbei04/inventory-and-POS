@@ -33,6 +33,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
   String _imagePath = '';
   bool _saving = false;
+  bool _noBarcode = false;
   String _selectedCategory = 'General';
   List<String> _categories = [];
   String _selectedUnit = 'pcs';
@@ -252,8 +253,12 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
 
-    final newQty = int.tryParse(_quantityCtrl.text.trim()) ?? 0;
-    final newPrice = double.tryParse(_priceCtrl.text.trim()) ?? 0;
+    final newQty = _isEdit
+        ? widget.existing!.quantity
+        : int.tryParse(_quantityCtrl.text.trim()) ?? 0;
+    final newPrice = _isEdit
+        ? widget.existing!.price
+        : double.tryParse(_priceCtrl.text.trim()) ?? 0;
     final newCost = double.tryParse(_costCtrl.text.trim()) ?? 0;
 
     final product = Product(
@@ -273,16 +278,18 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
     try {
       final db = DatabaseHelper.instance;
-      final existing = await db.getProductByBarcode(product.barcode);
-      if (existing != null && existing.id != widget.existing?.id) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('A product with this barcode already exists.'),
-            ),
-          );
+      if (!_noBarcode) {
+        final existing = await db.getProductByBarcode(product.barcode);
+        if (existing != null && existing.id != widget.existing?.id) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('A product with this barcode already exists.'),
+              ),
+            );
+          }
+          return;
         }
-        return;
       }
 
       if (_isEdit) {
@@ -486,13 +493,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
       appBar: AppBar(
         title: Text(_isEdit ? 'Edit Product' : 'New Product'),
         centerTitle: true,
-        actions: [
-          if (_isEdit)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: _delete,
-            ),
-        ],
       ),
       body: Form(
         key: _formKey,
@@ -567,9 +567,20 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.qr_code_scanner),
                   onPressed: () async {
-                    final barcode = await ScanScreen.pickAndScan(
+                    final db = DatabaseHelper.instance;
+                    final savedMode = await db.getSetting('default_scan_mode');
+                    if (!mounted) return;
+                    final mode = savedMode == 'external'
+                        ? ScanMode.external
+                        : ScanMode.camera;
+                    final barcode = await Navigator.push<String>(
                       context,
-                      title: 'Scan Barcode',
+                      MaterialPageRoute(
+                        builder: (_) => ScanScreen(
+                          title: 'Scan Barcode',
+                          initialMode: mode,
+                        ),
+                      ),
                     );
                     if (barcode != null && mounted) {
                       _barcodeCtrl.text = barcode;
@@ -581,6 +592,39 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
               validator: (v) => (v == null || v.trim().isEmpty)
                   ? 'Barcode is required'
                   : null,
+            ),
+            Row(
+              children: [
+                Checkbox(
+                  value: _noBarcode,
+                  onChanged: (val) {
+                    setState(() {
+                      _noBarcode = val ?? false;
+                      if (_noBarcode && !_isEdit) {
+                        _barcodeCtrl.text = 'NO-BC-${DateTime.now().millisecondsSinceEpoch}';
+                      }
+                    });
+                  },
+                  visualDensity: VisualDensity.compact,
+                ),
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _noBarcode = !_noBarcode;
+                      if (_noBarcode && !_isEdit) {
+                        _barcodeCtrl.text = 'NO-BC-${DateTime.now().millisecondsSinceEpoch}';
+                      }
+                    });
+                  },
+                  child: Text(
+                    'No barcode available',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -631,67 +675,81 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                   v == null || v.isEmpty ? 'Category required' : null,
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _priceCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Selling price',
-                      prefixIcon: Icon(Icons.trending_up, size: 20),
-                      prefixText: '₱ ',
+            if (_isEdit)
+              _readOnlyField(
+                label: 'Selling price',
+                icon: Icons.trending_up,
+                value: '₱${widget.existing!.price.toStringAsFixed(2)}',
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _priceCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Selling price',
+                        prefixIcon: Icon(Icons.trending_up, size: 20),
+                        prefixText: '₱ ',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Required';
+                        final val = double.tryParse(v.trim());
+                        if (val == null) return 'Invalid number';
+                        if (val <= 0) return 'Must be > 0';
+                        return null;
+                      },
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Required';
-                      final val = double.tryParse(v.trim());
-                      if (val == null) return 'Invalid number';
-                      if (val <= 0) return 'Must be > 0';
-                      return null;
-                    },
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    controller: _costCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Cost price',
-                      prefixIcon: Icon(Icons.money_off, size: 20),
-                      prefixText: '₱ ',
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _costCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Cost price',
+                        prefixIcon: Icon(Icons.money_off, size: 20),
+                        prefixText: '₱ ',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Required';
+                        final val = double.tryParse(v.trim());
+                        if (val == null) return 'Invalid number';
+                        if (val < 0) return 'Cannot be negative';
+                        return null;
+                      },
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Required';
-                      final val = double.tryParse(v.trim());
-                      if (val == null) return 'Invalid number';
-                      if (val < 0) return 'Cannot be negative';
-                      return null;
-                    },
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _quantityCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Quantity',
-                prefixIcon: Icon(Icons.numbers, size: 20),
+                ],
               ),
-              keyboardType: TextInputType.number,
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'Required';
-                final val = int.tryParse(v.trim());
-                if (val == null) return 'Invalid number';
-                if (val < 0) return 'Cannot be negative';
-                return null;
-              },
-            ),
+            const SizedBox(height: 16),
+            if (_isEdit)
+              _readOnlyField(
+                label: 'Quantity',
+                icon: Icons.numbers,
+                value: '${widget.existing!.quantity} ${widget.existing!.unit}',
+              )
+            else
+              TextFormField(
+                controller: _quantityCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Quantity',
+                  prefixIcon: Icon(Icons.numbers, size: 20),
+                ),
+                keyboardType: TextInputType.number,
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Required';
+                  final val = int.tryParse(v.trim());
+                  if (val == null) return 'Invalid number';
+                  if (val < 0) return 'Cannot be negative';
+                  return null;
+                },
+              ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               value: _selectedUnit,
@@ -741,23 +799,94 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
               maxLines: 3,
             ),
             const SizedBox(height: 32),
-            FilledButton.icon(
-              onPressed: _saving ? null : _save,
-              icon: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+            if (_isEdit) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _saving ? null : _save,
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.save),
+                      label: const Text('Update'),
+                      style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: _delete,
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      label: const Text('Delete'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: BorderSide(color: Colors.red.shade300),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                       ),
-                    )
-                  : const Icon(Icons.save),
-              label: Text(_isEdit ? 'Update Product' : 'Save Product'),
-            ),
+                    ),
+                  ),
+                ],
+              ),
+            ] else
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _saving ? null : _save,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.save),
+                  label: const Text('Save Product'),
+                  style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                ),
+              ),
             const SizedBox(height: 16),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _readOnlyField({
+    required String label,
+    required IconData icon,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Colors.grey.shade500),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+        ],
       ),
     );
   }

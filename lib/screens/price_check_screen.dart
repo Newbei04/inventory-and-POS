@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../theme/app_theme.dart';
+import '../utils/scan_beep.dart';
 import '../utils/usb_scanner_service.dart';
 import '../widgets/empty_state_widget.dart';
+import '../widgets/scanner_mode_sheet.dart';
 import 'scan_screen.dart';
 
 class PriceCheckScreen extends StatefulWidget {
@@ -37,6 +39,23 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
   void initState() {
     super.initState();
     _loadAll();
+    _loadDefaultScanner();
+  }
+
+  Future<void> _loadDefaultScanner() async {
+    final defaultMode = await _db.getSetting('default_scan_mode');
+    if (!mounted) return;
+    if (defaultMode == 'external') {
+      setState(() {
+        _externalScanner = true;
+        _searchCtrl.clear();
+        _product = null;
+        _filtered = _allProducts;
+        _error = null;
+        _showingList = false;
+      });
+      _startScanner();
+    }
   }
 
   @override
@@ -142,6 +161,7 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
 
   void _onScannerBarcode(String barcode) {
     if (barcode.trim().isNotEmpty) {
+      ScanBeep.play();
       _searchCtrl.text = barcode;
       _lookup(barcode);
     }
@@ -161,140 +181,34 @@ class _PriceCheckScreenState extends State<PriceCheckScreen> {
     });
   }
 
-  void _showScannerSettings() {
-    showModalBottomSheet(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child:
-                      Icon(Icons.qr_code_scanner, color: Colors.blue.shade700),
-                ),
-                const SizedBox(width: 12),
-                const Text(
-                  'Scanner Mode',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            _scannerOption(
-              icon: Icons.camera_alt,
-              title: 'Camera Scanner',
-              subtitle: 'Use the device camera to scan barcodes',
-              selected: !_externalScanner,
-              onTap: () {
-                setState(() => _externalScanner = false);
-                Navigator.pop(context);
-              },
-            ),
-            const SizedBox(height: 8),
-            _scannerOption(
-              icon: Icons.usb,
-              title: 'USB Scanner',
-              subtitle:
-                  'Use a USB barcode scanner',
-              selected: _externalScanner,
-              onTap: () {
-                setState(() {
-                  _externalScanner = true;
-                  _searchCtrl.clear();
-                  _product = null;
-                  _filtered = _allProducts;
-                  _error = null;
-                  _showingList = false;
-                });
-                Navigator.pop(context);
-                _startScanner();
-              },
-            ),
-          ],
-        ),
-      ),
+  Future<void> _showScannerSettings() async {
+    final result = await showScannerModeSheet(
+      context,
+      isExternal: _externalScanner,
     );
-  }
-
-  Widget _scannerOption({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: selected ? Colors.blue : Colors.grey.shade300,
-          width: selected ? 2 : 1,
-        ),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-              color: selected
-                  ? Colors.blue.shade50
-                  : Colors.grey.shade700,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              icon,
-              color: selected ? Colors.blue.shade700 : Colors.white,
-              size: 24,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: selected ? Colors.blue.shade700 : null,
-                      ),
-                    ),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (selected)
-                Icon(Icons.check_circle, color: Colors.blue.shade600),
-            ],
-          ),
-        ),
-      ),
-    );
+    if (result == null || !mounted) return;
+    final switchToExternal = result == ScannerChoice.external && !_externalScanner;
+    final switchToCamera = result == ScannerChoice.camera && _externalScanner;
+    if (switchToExternal) {
+      setState(() {
+        _externalScanner = true;
+        _searchCtrl.clear();
+        _product = null;
+        _filtered = _allProducts;
+        _error = null;
+        _showingList = false;
+      });
+      _startScanner();
+    } else if (switchToCamera) {
+      setState(() {
+        _externalScanner = false;
+        _searchCtrl.clear();
+        _product = null;
+        _filtered = _allProducts;
+        _error = null;
+        _showingList = false;
+      });
+    }
   }
 
   Widget _buildBarcodeContent() {

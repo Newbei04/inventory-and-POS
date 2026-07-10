@@ -2,11 +2,74 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../db/database_helper.dart';
 import '../models/product.dart';
-import 'scan_screen.dart';
+import '../utils/scan_beep.dart';
+import '../utils/usb_scanner_service.dart';
+import '../widgets/scanner_mode_sheet.dart';
+
+enum _ScannerMode { camera, external }
+
+enum _CountMode { add, remove }
+
+enum RemoveReason { expired, defective, destroyed, adjustment }
+
+enum AddReason { restock, returned, transfer, found, adjustment }
+
+extension _RemoveReasonX on RemoveReason {
+  String get label => switch (this) {
+    RemoveReason.expired => 'Expired',
+    RemoveReason.defective => 'Defective',
+    RemoveReason.destroyed => 'Destroyed',
+    RemoveReason.adjustment => 'Adjustment',
+  };
+  IconData get icon => switch (this) {
+    RemoveReason.expired => Icons.event_busy,
+    RemoveReason.defective => Icons.broken_image,
+    RemoveReason.destroyed => Icons.delete_forever,
+    RemoveReason.adjustment => Icons.tune,
+  };
+  Color get color => switch (this) {
+    RemoveReason.expired => Colors.red,
+    RemoveReason.defective => Colors.deepPurple,
+    RemoveReason.destroyed => Colors.brown,
+    RemoveReason.adjustment => Colors.blueGrey,
+  };
+}
+
+extension _AddReasonX on AddReason {
+  String get label => switch (this) {
+    AddReason.restock => 'Restock',
+    AddReason.returned => 'Returned',
+    AddReason.transfer => 'Transfer',
+    AddReason.found => 'Found',
+    AddReason.adjustment => 'Adjustment',
+  };
+  IconData get icon => switch (this) {
+    AddReason.restock => Icons.local_shipping,
+    AddReason.returned => Icons.assignment_return,
+    AddReason.transfer => Icons.swap_horiz,
+    AddReason.found => Icons.search,
+    AddReason.adjustment => Icons.tune,
+  };
+  Color get color => switch (this) {
+    AddReason.restock => Colors.green,
+    AddReason.returned => Colors.teal,
+    AddReason.transfer => Colors.blue,
+    AddReason.found => Colors.indigo,
+    AddReason.adjustment => Colors.blueGrey,
+  };
+}
+
+class _CartItem {
+  final Product product;
+  int quantity;
+  RemoveReason? reason;
+
+  _CartItem({required this.product, required this.quantity});
+}
 
 class InventoryV2Screen extends StatefulWidget {
   const InventoryV2Screen({super.key});
@@ -17,134 +80,542 @@ class InventoryV2Screen extends StatefulWidget {
 
 class _InventoryV2ScreenState extends State<InventoryV2Screen> {
   final _db = DatabaseHelper.instance;
-  final List<_CountedItem> _countedItems = [];
+  final _scannerController = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+    facing: CameraFacing.back,
+    torchEnabled: false,
+  );
+  final _usbScanner = UsbScannerService();
+  StreamSubscription<String>? _usbSub;
+  final _searchCtrl = TextEditingController();
 
-  int get _totalScanned => _countedItems.length;
-  int get _totalAdded =>
-      _countedItems.where((e) => e.mode == _CountMode.add).length;
-  int get _totalRemoved =>
-      _countedItems.where((e) => e.mode == _CountMode.remove).length;
+  _ScannerMode _scannerMode = _ScannerMode.camera;
+  _CountMode _countMode = _CountMode.add;
+  AddReason? _selectedAddReason;
+  final List<_CartItem> _cartItems = [];
+  bool _torchOn = false;
+  bool _usbConnected = false;
+  String _usbStatus = 'Disconnected';
+  String? _lastBarcode;
+  bool _loading = false;
 
-  Future<void> _scanBarcode() async {
-    final barcode = await ScanScreen.pickAndScan(
-      context,
-      title: 'Scan to Count',
-    );
-    if (barcode == null || barcode.isEmpty || !mounted) return;
-    await _onBarcodeScanned(barcode);
+  List<Product> _searchResults = [];
+  bool _showingSearch = false;
+
+  int get _totalItems => _cartItems.length;
+  int get _totalQty => _cartItems.fold(0, (sum, e) => sum + e.quantity);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDefaultScanner();
   }
 
-  Future<void> _onBarcodeScanned(String barcode) async {
-    final product = await _db.getProductByBarcode(barcode);
+  @override
+  void dispose() {
+    _usbSub?.cancel();
+    _usbScanner.dispose();
+    _scannerController.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadDefaultScanner() async {
+    final mode = await _db.getSetting('default_scan_mode');
     if (!mounted) return;
+    final target = mode == 'external' ? _ScannerMode.external : _ScannerMode.camera;
+    if (target != _scannerMode) {
+      await _setScannerMode(target);
+    } else if (_scannerMode == _ScannerMode.camera) {
+      _scannerController.start();
+    }
+  }
+
+  Future<void> _setScannerMode(_ScannerMode mode) async {
+    if (mode == _scannerMode) return;
+    setState(() {
+      _scannerMode = mode;
+      _lastBarcode = null;
+      _loading = false;
+    });
+    if (mode == _ScannerMode.camera) {
+      _usbSub?.cancel();
+      _usbScanner.disconnect();
+      await _scannerController.start();
+    } else {
+      await _scannerController.stop();
+      _startUsbScanner();
+    }
+  }
+
+  void _startUsbScanner() {
+    _usbScanner.connect();
+    _usbSub?.cancel();
+    _usbSub = _usbScanner.barcodeStream.listen((barcode) {
+      if (mounted) {
+        setState(() {
+          _usbConnected = _usbScanner.isConnected;
+          _usbStatus = _usbScanner.status;
+        });
+        _onBarcodeDetected(barcode);
+      }
+    });
+    if (mounted) {
+      setState(() {
+        _usbConnected = _usbScanner.isConnected;
+        _usbStatus = _usbScanner.status;
+      });
+    }
+  }
+
+  void _flipCamera() => _scannerController.switchCamera();
+  void _toggleTorch() {
+    _scannerController.toggleTorch();
+    setState(() => _torchOn = !_torchOn);
+  }
+
+  void _onCameraDetect(BarcodeCapture capture) {
+    if (_loading) return;
+    final barcodes = capture.barcodes;
+    if (barcodes.isEmpty) return;
+    final value = barcodes.first.rawValue;
+    if (value == null || value.isEmpty || value == _lastBarcode) return;
+    _onBarcodeDetected(value);
+  }
+
+  Future<void> _onBarcodeDetected(String barcode) async {
+    ScanBeep.play();
+    final bc = barcode.trim();
+    _lastBarcode = bc;
+    setState(() => _loading = true);
+
+    final product = await _db.getProductByBarcode(bc);
+    if (!mounted) return;
+    setState(() => _loading = false);
 
     if (product == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('No product found for barcode: $barcode'),
+          content: Text('No product found for: $bc'),
           behavior: SnackBarBehavior.floating,
           backgroundColor: Colors.orange.shade700,
+          duration: const Duration(seconds: 1),
         ),
       );
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() => _lastBarcode = null);
+      });
       return;
     }
 
-    final result = await showDialog<_CountResult>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _CountDialog(product: product),
-    );
+    if (_countMode == _CountMode.add) {
+      _addToCart(product);
+    } else {
+      _addToRemoveCart(product);
+    }
 
-    if (result == null || !mounted) return;
-
-    setState(() {
-      _countedItems.insert(0, result.item);
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _lastBarcode = null);
     });
+  }
 
-    final delta = result.item.mode == _CountMode.add
-        ? result.item.quantity
-        : -result.item.quantity;
-    final reasonLabel = result.item.reason?.label ?? '';
-    await _db.adjustStock(result.product.id!, delta, reason: reasonLabel);
-
-    if (!mounted) return;
+  void _addToCart(Product product) {
+    final idx = _cartItems.indexWhere((e) => e.product.id == product.id);
+    if (idx >= 0) {
+      _cartItems[idx].quantity++;
+    } else {
+      _cartItems.insert(0, _CartItem(product: product, quantity: 1));
+    }
+    setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result.item.mode == _CountMode.add
-            ? '+${result.item.quantity} added to ${result.product.name}'
-            : '${result.item.quantity} removed from ${result.product.name} (${result.item.reason?.label ?? "N/A"})'),
+        content: Text('${product.name} — qty ${_cartItems.firstWhere((e) => e.product.id == product.id).quantity}'),
         behavior: SnackBarBehavior.floating,
-        backgroundColor: result.item.mode == _CountMode.add
-            ? Colors.green.shade600
-            : Colors.orange.shade700,
-        duration: const Duration(seconds: 1),
+        duration: const Duration(milliseconds: 600),
       ),
     );
+  }
+
+  void _addToRemoveCart(Product product) {
+    final idx = _cartItems.indexWhere((e) => e.product.id == product.id);
+    if (idx >= 0) {
+      _cartItems[idx].quantity++;
+    } else {
+      _cartItems.insert(0, _CartItem(product: product, quantity: 1));
+    }
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${product.name} — marking ${_cartItems.firstWhere((e) => e.product.id == product.id).quantity} for removal'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.orange.shade700,
+        duration: const Duration(milliseconds: 600),
+      ),
+    );
+  }
+
+  void _onSearch(String q) {
+    if (q.trim().isEmpty) {
+      setState(() { _searchResults = []; _showingSearch = false; });
+      return;
+    }
+    setState(() => _showingSearch = true);
+    _db.getAllProducts(search: q.trim()).then((r) {
+      if (mounted) setState(() => _searchResults = r);
+    });
+  }
+
+  void _selectSearchProduct(Product p) {
+    _searchCtrl.clear();
+    setState(() { _searchResults = []; _showingSearch = false; });
+    if (_countMode == _CountMode.add) {
+      _addToCart(p);
+    } else {
+      _addToRemoveCart(p);
+    }
+  }
+
+  void _clearCart() => setState(() => _cartItems.clear());
+
+  Future<void> _applyAll() async {
+    if (_cartItems.isEmpty) return;
+    if (_countMode == _CountMode.add && _selectedAddReason == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a reason before applying'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    if (_countMode == _CountMode.remove) {
+      final noReason = _cartItems.where((e) => e.reason == null).toList();
+      if (noReason.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${noReason.length} item(s) missing a removal reason'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+    }
+
+    int success = 0;
+    for (final item in _cartItems) {
+      try {
+        if (_countMode == _CountMode.add) {
+          await _db.adjustStock(item.product.id!, item.quantity, reason: _selectedAddReason?.label ?? '', type: 'add');
+        } else {
+          final clamped = item.quantity > item.product.quantity ? item.product.quantity : item.quantity;
+          await _db.adjustStock(item.product.id!, -clamped, reason: item.reason!.label, type: 'remove');
+        }
+        success++;
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    final isAdd = _countMode == _CountMode.add;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isAdd ? 'Added stock for $success product(s)' : 'Removed stock for $success product(s)'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: isAdd ? Colors.green.shade600 : Colors.orange.shade700,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    setState(() => _cartItems.clear());
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Inventory Count'),
+        title: Text(_scannerMode == _ScannerMode.camera
+            ? 'Inventory Count'
+            : 'Inventory Count — USB'),
         centerTitle: true,
         actions: [
-          if (_countedItems.isNotEmpty)
+          if (_cartItems.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.bar_chart_rounded),
-              tooltip: 'Session Summary',
-              onPressed: _showSummary,
+              icon: Badge(label: Text('${_cartItems.length}', style: const TextStyle(fontSize: 10, color: Colors.white)),
+                  child: const Icon(Icons.shopping_cart_outlined, size: 22)),
+              tooltip: 'View Cart',
+              onPressed: _showCartSheet,
+            ),
+          if (_scannerMode == _ScannerMode.camera) ...[
+            IconButton(
+              icon: const Icon(Icons.flip_camera_android, size: 22),
+              tooltip: 'Flip camera',
+              onPressed: _flipCamera,
+            ),
+            IconButton(
+              icon: Icon(_torchOn ? Icons.flash_on : Icons.flash_off, size: 22),
+              tooltip: 'Flashlight',
+              onPressed: _toggleTorch,
+            ),
+          ],
+          IconButton(
+            icon: const Icon(Icons.tune_rounded, size: 22),
+            tooltip: 'Scanner settings',
+            onPressed: _showScannerModeSheet,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_scannerMode == _ScannerMode.camera)
+            _buildCameraSection()
+          else
+            _buildUsbSection(),
+          _buildModeBar(),
+          if (_countMode == _CountMode.add) _buildAddReasonBar(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: _countMode == _CountMode.add ? 'Search to add...' : 'Search to remove...',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                isDense: true,
+                suffixIcon: _searchCtrl.text.isNotEmpty
+                    ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { _searchCtrl.clear(); _onSearch(''); })
+                    : null,
+              ),
+              onChanged: _onSearch,
+            ),
+          ),
+          if (_showingSearch)
+            Expanded(
+              child: _searchResults.isEmpty
+                  ? Center(child: Text('No products found', style: TextStyle(color: Colors.grey.shade500)))
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
+                      itemCount: _searchResults.length,
+                      itemBuilder: (_, i) => _searchTile(_searchResults[i]),
+                    ),
+            )
+          else
+            Expanded(
+              child: _cartItems.isEmpty ? _buildEmptyState() : _buildCartList(),
             ),
         ],
       ),
-      body: _countedItems.isEmpty ? _buildEmptyState() : _buildList(),
       bottomNavigationBar: _buildBottomBar(),
     );
   }
 
+  // ── Camera section ──
+
+  Widget _buildCameraSection() {
+    return SizedBox(
+      height: 200,
+      child: Stack(
+        children: [
+          MobileScanner(controller: _scannerController, onDetect: _onCameraDetect),
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: _loading ? Colors.amber : Colors.white38,
+                width: 3,
+              ),
+            ),
+          ),
+          Center(
+            child: Container(
+              width: 200,
+              height: 100,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _loading ? Colors.amber.shade400 : Colors.white.withValues(alpha: 0.3),
+                  width: 2,
+                ),
+              ),
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator(color: Colors.amber))
+                  : null,
+            ),
+          ),
+          if (!_loading)
+            Positioned(
+              left: 0, right: 0, bottom: 12,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
+                  child: Text(
+                    _countMode == _CountMode.add
+                        ? 'Scan to add stock'
+                        : 'Scan to remove stock',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── USB section ──
+
+  Widget _buildUsbSection() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: _loading ? Colors.amber.shade50 : _usbConnected ? Colors.green.shade50 : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: _loading
+                ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber.shade700))
+                : Icon(_usbConnected ? Icons.usb : Icons.usb_off, size: 20,
+                    color: _usbConnected ? Colors.green : Colors.grey.shade600),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _loading ? 'Looking up...' : _usbConnected ? 'Ready — scan a barcode' : _usbStatus,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+                color: _loading ? Colors.amber.shade800 : _usbConnected ? Colors.green.shade700 : Colors.grey.shade600),
+            ),
+          ),
+          if (!_usbConnected)
+            FilledButton.tonal(
+              onPressed: _startUsbScanner,
+              child: const Text('Connect', style: TextStyle(fontSize: 12)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Mode bar ──
+
+  Widget _buildModeBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(10)),
+      padding: const EdgeInsets.all(2),
+      child: Row(
+        children: [
+          Expanded(child: _modeTab('Add', Icons.add, _countMode == _CountMode.add, Colors.green, () {
+            setState(() { _countMode = _CountMode.add; _cartItems.clear(); });
+          })),
+          Expanded(child: _modeTab('Remove', Icons.remove, _countMode == _CountMode.remove, Colors.orange, () {
+            setState(() { _countMode = _CountMode.remove; _cartItems.clear(); _selectedAddReason = null; });
+          })),
+        ],
+      ),
+    );
+  }
+
+  Widget _modeTab(String label, IconData icon, bool active, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? color.withValues(alpha: 0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: active ? Border.all(color: color.withValues(alpha: 0.3)) : null,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 14, color: active ? color : Colors.grey.shade500),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                color: active ? color : Colors.grey.shade500)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Add reason bar ──
+
+  Widget _buildAddReasonBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.green.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Reason', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.green.shade700)),
+          const SizedBox(height: 4),
+          Row(
+            children: AddReason.values.map((r) {
+              final sel = _selectedAddReason == r;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => _selectedAddReason = r),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 2),
+                    decoration: BoxDecoration(
+                      color: sel ? r.color.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: sel ? r.color.withValues(alpha: 0.5) : Colors.grey.shade200),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(r.icon, size: 12, color: sel ? r.color : Colors.grey.shade400),
+                        const SizedBox(height: 1),
+                        Text(r.label, style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600,
+                            color: sel ? r.color : Colors.grey.shade500)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Empty state ──
+
   Widget _buildEmptyState() {
+    final isAdd = _countMode == _CountMode.add;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: (isAdd ? Colors.green : Colors.orange).shade50,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.qr_code_scanner,
-                  size: 56, color: Colors.blue.shade400),
+              child: Icon(isAdd ? Icons.add_shopping_cart : Icons.remove_shopping_cart,
+                  size: 48, color: (isAdd ? Colors.green : Colors.orange).shade300),
             ),
-            const SizedBox(height: 24),
-            const Text(
-              'No items counted yet',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
+            Text(isAdd ? 'No items to add' : 'No items to remove',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
             Text(
-              'Scan a barcode to add or remove stock.',
+              isAdd ? 'Scan a barcode — same product increments qty' : 'Scan a barcode to mark for removal',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey.shade500,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 32),
-            FilledButton.icon(
-              onPressed: _scanBarcode,
-              icon: const Icon(Icons.qr_code_scanner, size: 20),
-              label: const Text('Start Scanning'),
-              style: FilledButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              ),
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
             ),
           ],
         ),
@@ -152,40 +623,37 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
     );
   }
 
-  Widget _buildList() {
+  // ── Cart list ──
+
+  Widget _buildCartList() {
+    final isAdd = _countMode == _CountMode.add;
     return Column(
       children: [
-        _buildStatsBar(),
+        Container(
+          margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _statPill('$_totalItems', 'Items', Colors.blue),
+              Container(width: 1, height: 16, color: Colors.grey.shade300),
+              _statPill('$_totalQty', 'Total', isAdd ? Colors.green : Colors.orange),
+            ],
+          ),
+        ),
         Expanded(
           child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-            itemCount: _countedItems.length,
-            itemBuilder: (_, i) => _countedItemCard(_countedItems[i]),
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 80),
+            itemCount: _cartItems.length,
+            itemBuilder: (_, i) => _cartItemCard(_cartItems[i]),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildStatsBar() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _statPill('$_totalScanned', 'Scanned', Colors.blue),
-          Container(width: 1, height: 20, color: Colors.grey.shade300),
-          _statPill('$_totalAdded', 'Added', Colors.green),
-          Container(width: 1, height: 20, color: Colors.grey.shade300),
-          _statPill('$_totalRemoved', 'Removed', Colors.orange),
-        ],
-      ),
     );
   }
 
@@ -193,119 +661,79 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-            color: color,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-        ),
+        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
+        Text(label, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
       ],
     );
   }
 
-  Widget _countedItemCard(_CountedItem item) {
-    final isAdd = item.mode == _CountMode.add;
-    final Color statusColor = isAdd ? Colors.green : Colors.orange;
-    final IconData statusIcon =
-        isAdd ? Icons.add_circle : Icons.remove_circle;
-    final String statusLabel = isAdd ? '+${item.quantity}' : '-${item.quantity}';
+  Widget _cartItemCard(_CartItem item) {
+    final isAdd = _countMode == _CountMode.add;
+    final color = isAdd ? Colors.green : Colors.orange;
+    final maxQty = isAdd ? 9999 : item.product.quantity;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 6),
+      margin: const EdgeInsets.only(bottom: 4),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Row(
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(8),
               child: SizedBox(
-                width: 44,
-                height: 44,
+                width: 36, height: 36,
                 child: item.product.imagePath.isNotEmpty
-                    ? Image.file(
-                        File(item.product.imagePath),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) =>
-                            _productPlaceholder(item.product),
-                      )
-                    : _productPlaceholder(item.product),
+                    ? Image.file(File(item.product.imagePath), fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _placeholder())
+                    : _placeholder(),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    item.product.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
+                  Text(item.product.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 1),
+                  Text('Stock: ${item.product.quantity}', style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                  if (!isAdd)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: _removeReasonChip(item),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      Text(
-                        item.product.barcode,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade500,
-                        ),
-                      ),
-                      if (!isAdd && item.reason != null) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: item.reason!.color.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            item.reason!.label,
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w600,
-                              color: item.reason!.color,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(statusIcon, color: statusColor, size: 14),
-                  const SizedBox(width: 4),
-                  Text(
-                    statusLabel,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _qtyBtn(Icons.remove, () {
+                  setState(() {
+                    if (item.quantity <= 1) {
+                      _cartItems.remove(item);
+                    } else {
+                      item.quantity--;
+                    }
+                  });
+                }),
+                SizedBox(
+                  width: 36,
+                  child: Text('${item.quantity}', textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
+                ),
+                _qtyBtn(Icons.add, () {
+                  setState(() {
+                    if (item.quantity < maxQty) item.quantity++;
+                  });
+                }),
+              ],
+            ),
+            GestureDetector(
+              onTap: () => setState(() => _cartItems.remove(item)),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(Icons.close, size: 16, color: Colors.grey.shade400),
               ),
             ),
           ],
@@ -314,50 +742,162 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
     );
   }
 
-  Widget _productPlaceholder(Product p) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(10),
+  Widget _removeReasonChip(_CartItem item) {
+    return GestureDetector(
+      onTap: () => _showReasonPickerForItem(item),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        decoration: BoxDecoration(
+          color: (item.reason?.color ?? Colors.grey).withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(item.reason?.icon ?? Icons.help_outline, size: 10,
+                color: item.reason?.color ?? Colors.grey.shade400),
+            const SizedBox(width: 2),
+            Text(
+              item.reason?.label ?? 'Tap reason',
+              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600,
+                  color: item.reason?.color ?? Colors.grey.shade500),
+            ),
+          ],
+        ),
       ),
-      child: Icon(Icons.inventory_2, color: Colors.grey.shade400, size: 20),
     );
   }
 
+  void _showReasonPickerForItem(_CartItem item) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Reason for ${item.product.name}', style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              Row(
+                children: RemoveReason.values.map((r) {
+                  final sel = item.reason == r;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () { setState(() => item.reason = r); Navigator.pop(ctx); },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                        decoration: BoxDecoration(
+                          color: sel ? r.color.withValues(alpha: 0.1) : Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: sel ? r.color.withValues(alpha: 0.4) : Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(r.icon, size: 18, color: sel ? r.color : Colors.grey.shade400),
+                            const SizedBox(height: 4),
+                            Text(r.label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
+                                color: sel ? r.color : Colors.grey.shade500)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Helpers ──
+
+  Widget _qtyBtn(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 26, height: 26,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Icon(icon, size: 14, color: Colors.grey.shade600),
+      ),
+    );
+  }
+
+  Widget _placeholder() => Container(
+    color: Colors.grey.shade200,
+    child: Icon(Icons.inventory_2, color: Colors.grey.shade400, size: 18),
+  );
+
+  Widget _searchTile(Product p) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 4),
+      child: ListTile(
+        dense: true,
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: 32, height: 32,
+            child: p.imagePath.isNotEmpty
+                ? Image.file(File(p.imagePath), fit: BoxFit.cover)
+                : _placeholder(),
+          ),
+        ),
+        title: Text(p.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1),
+        subtitle: Text('${p.barcode}  •  ${p.quantity} ${p.unit}',
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+        trailing: Icon(Icons.add_circle_outline, color: _countMode == _CountMode.add ? Colors.green : Colors.orange, size: 20),
+        onTap: () => _selectSearchProduct(p),
+      ),
+    );
+  }
+
+  // ── Bottom bar ──
+
   Widget _buildBottomBar() {
+    final isAdd = _countMode == _CountMode.add;
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
       ),
       child: SafeArea(
         top: false,
         child: Row(
           children: [
-            if (_countedItems.isNotEmpty)
+            if (_cartItems.isNotEmpty)
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _showSummary,
-                  icon: const Icon(Icons.summarize, size: 18),
-                  label: const Text('Summary'),
+                  onPressed: _clearCart,
+                  icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                  label: const Text('Clear', style: TextStyle(fontSize: 12)),
                 ),
               ),
-            if (_countedItems.isNotEmpty) const SizedBox(width: 12),
+            if (_cartItems.isNotEmpty) const SizedBox(width: 8),
             Expanded(
-              flex: _countedItems.isEmpty ? 1 : 2,
+              flex: _cartItems.isEmpty ? 1 : 2,
               child: FilledButton.icon(
-                onPressed: _scanBarcode,
-                icon: const Icon(Icons.qr_code_scanner, size: 20),
+                onPressed: _cartItems.isNotEmpty ? _applyAll : null,
+                icon: const Icon(Icons.check_circle, size: 18),
                 label: Text(
-                    _countedItems.isEmpty ? 'Scan Barcode' : 'Scan Next'),
+                  _cartItems.isEmpty
+                      ? 'Scan a barcode'
+                      : isAdd ? 'Apply Add (${_cartItems.length})' : 'Apply Remove (${_cartItems.length})',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _cartItems.isNotEmpty ? (isAdd ? Colors.green : Colors.orange) : Colors.grey.shade300,
+                ),
               ),
             ),
           ],
@@ -366,604 +906,71 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
     );
   }
 
-  void _showSummary() {
-    final added = _countedItems.where((e) => e.mode == _CountMode.add).toList();
-    final removed =
-        _countedItems.where((e) => e.mode == _CountMode.remove).toList();
+  // ── Cart bottom sheet ──
+
+  void _showCartSheet() {
+    final isAdd = _countMode == _CountMode.add;
+    final color = isAdd ? Colors.green : Colors.orange;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
+        initialChildSize: 0.6, minChildSize: 0.3, maxChildSize: 0.9, expand: false,
         builder: (ctx, scrollCtrl) => Column(
           children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Session Summary',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
+            Container(margin: const EdgeInsets.only(top: 10), width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  _summaryChip('$_totalScanned Scanned', Colors.blue),
-                  const SizedBox(width: 8),
-                  _summaryChip('$_totalAdded Added', Colors.green),
-                  const SizedBox(width: 8),
-                  _summaryChip('$_totalRemoved Removed', Colors.orange),
-                ],
-              ),
+              padding: const EdgeInsets.all(14),
+              child: Text(isAdd ? 'Add Stock Cart' : 'Remove Stock Cart',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             ),
-            const SizedBox(height: 16),
             Expanded(
-              child: ListView(
+              child: ListView.builder(
                 controller: scrollCtrl,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                children: [
-                  if (added.isNotEmpty) ...[
-                    _summarySectionHeader('Stock Added', Colors.green),
-                    ...added.map((e) => _summaryTile(e)),
-                    const SizedBox(height: 12),
-                  ],
-                  if (removed.isNotEmpty) ...[
-                    _summarySectionHeader('Stock Removed', Colors.orange),
-                    ...removed.map((e) => _summaryTile(e)),
-                  ],
-                  const SizedBox(height: 32),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _summaryChip(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: Color.lerp(color, Colors.black, 0.3),
-        ),
-      ),
-    );
-  }
-
-  Widget _summarySectionHeader(String title, Color color) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Icon(Icons.circle, size: 8, color: color),
-          const SizedBox(width: 6),
-          Text(
-            title,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-              color: Color.lerp(color, Colors.black, 0.3),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _summaryTile(_CountedItem item) {
-    final isAdd = item.mode == _CountMode.add;
-    final Color color = isAdd ? Colors.green : Colors.orange;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 4),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.product.name,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
-                  ),
-                  if (!isAdd && item.reason != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      item.reason!.label,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: item.reason!.color,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            Text(
-              isAdd ? '+${item.quantity}' : '-${item.quantity}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                color: Color.lerp(color, Colors.black, 0.15),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Data models ──
-
-enum _CountMode { add, remove }
-
-enum RemoveReason { expired, defective, destroyed }
-
-extension _RemoveReasonLabel on RemoveReason {
-  String get label {
-    switch (this) {
-      case RemoveReason.expired:
-        return 'Expired';
-      case RemoveReason.defective:
-        return 'Defective';
-      case RemoveReason.destroyed:
-        return 'Destroyed';
-    }
-  }
-
-  IconData get icon {
-    switch (this) {
-      case RemoveReason.expired:
-        return Icons.event_busy;
-      case RemoveReason.defective:
-        return Icons.broken_image;
-      case RemoveReason.destroyed:
-        return Icons.delete_forever;
-    }
-  }
-
-  Color get color {
-    switch (this) {
-      case RemoveReason.expired:
-        return Colors.red;
-      case RemoveReason.defective:
-        return Colors.deepPurple;
-      case RemoveReason.destroyed:
-        return Colors.brown;
-    }
-  }
-}
-
-class _CountedItem {
-  final Product product;
-  final _CountMode mode;
-  final int quantity;
-  final RemoveReason? reason;
-
-  const _CountedItem({
-    required this.product,
-    required this.mode,
-    required this.quantity,
-    this.reason,
-  });
-}
-
-class _CountResult {
-  final Product product;
-  final _CountedItem item;
-
-  const _CountResult(this.product, this.item);
-}
-
-// ── Dialog ──
-
-class _CountDialog extends StatefulWidget {
-  final Product product;
-  const _CountDialog({required this.product});
-
-  @override
-  State<_CountDialog> createState() => _CountDialogState();
-}
-
-class _CountDialogState extends State<_CountDialog> {
-  final _ctrl = TextEditingController();
-  _CountMode _mode = _CountMode.add;
-  RemoveReason? _selectedReason;
-  String? _errorText;
-
-  int get _currentStock => widget.product.quantity;
-  int? get _qty => int.tryParse(_ctrl.text.trim());
-  int get _newStock =>
-      _qty != null
-          ? (_mode == _CountMode.add ? _currentStock + _qty! : _currentStock - _qty!)
-          : _currentStock;
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _confirm() {
-    final q = _qty;
-    if (q == null || q <= 0) {
-      setState(() => _errorText = 'Enter a quantity greater than 0');
-      return;
-    }
-    if (_mode == _CountMode.remove && q > _currentStock) {
-      setState(
-          () => _errorText = 'Can\'t remove more than current stock ($_currentStock)');
-      return;
-    }
-    if (_mode == _CountMode.remove && _selectedReason == null) {
-      setState(() => _errorText = 'Select a reason for removal');
-      return;
-    }
-    Navigator.pop(
-      context,
-      _CountResult(
-        widget.product,
-        _CountedItem(
-          product: widget.product,
-          mode: _mode,
-          quantity: q,
-          reason: _selectedReason,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = widget.product;
-    final isAdd = _mode == _CountMode.add;
-    final Color modeColor = isAdd ? Colors.green : Colors.orange;
-
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
-      title: Row(
-        children: [
-          Icon(isAdd ? Icons.add_circle : Icons.remove_circle,
-              color: modeColor, size: 22),
-          const SizedBox(width: 8),
-          Text(isAdd ? 'Add Stock' : 'Remove Stock',
-              style: const TextStyle(fontSize: 18)),
-        ],
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildProductInfo(p),
-            const SizedBox(height: 16),
-            _buildModeToggle(),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _ctrl,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: isAdd ? 'Quantity to add' : 'Quantity to remove',
-                prefixIcon: Icon(
-                    isAdd ? Icons.add_shopping_cart : Icons.remove_shopping_cart),
-                errorText: _errorText,
-                suffixText: p.unit,
-              ),
-              onChanged: (_) {
-                if (_errorText != null) setState(() => _errorText = null);
-                setState(() {});
-              },
-              onSubmitted: (_) => _confirm(),
-            ),
-            if (!isAdd) ...[
-              const SizedBox(height: 14),
-              _buildReasonPicker(),
-            ],
-            if (_qty != null && _qty! > 0) ...[
-              const SizedBox(height: 14),
-              _buildPreviewRow(isAdd),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Skip'),
-        ),
-        FilledButton(
-          onPressed: (_qty != null && _qty! > 0)
-              ? (isAdd || _selectedReason != null)
-                  ? _confirm
-                  : null
-              : null,
-          style: FilledButton.styleFrom(
-            backgroundColor: modeColor,
-          ),
-          child: const Text('Confirm'),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProductInfo(Product p) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: SizedBox(
-              width: 48,
-              height: 48,
-              child: p.imagePath.isNotEmpty
-                  ? Image.file(
-                      File(p.imagePath),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _placeholder(),
-                    )
-                  : _placeholder(),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  p.name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Text(
-                      p.barcode,
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                    ),
-                    if (p.category.isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          p.category,
-                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                itemCount: _cartItems.length,
+                itemBuilder: (_, i) {
+                  final item = _cartItems[i];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 4),
+                    child: ListTile(
+                      dense: true,
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          width: 32, height: 32,
+                          child: item.product.imagePath.isNotEmpty
+                              ? Image.file(File(item.product.imagePath), fit: BoxFit.cover)
+                              : _placeholder(),
                         ),
                       ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _placeholder() {
-    return Container(
-      color: Colors.grey.shade200,
-      child: Icon(Icons.inventory_2, color: Colors.grey.shade400, size: 22),
-    );
-  }
-
-  Widget _buildModeToggle() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.all(3),
-      child: Row(
-        children: [
-          Expanded(
-            child: _modeTab(
-              label: 'Add',
-              icon: Icons.add,
-              active: _mode == _CountMode.add,
-              activeColor: Colors.green,
-              onTap: () => setState(() {
-                _mode = _CountMode.add;
-                _selectedReason = null;
-                _errorText = null;
-              }),
-            ),
-          ),
-          Expanded(
-            child: _modeTab(
-              label: 'Remove',
-              icon: Icons.remove,
-              active: _mode == _CountMode.remove,
-              activeColor: Colors.orange,
-              onTap: () => setState(() {
-                _mode = _CountMode.remove;
-                _errorText = null;
-              }),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _modeTab({
-    required String label,
-    required IconData icon,
-    required bool active,
-    required Color activeColor,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: active ? activeColor.withValues(alpha: 0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          border: active
-              ? Border.all(color: activeColor.withValues(alpha: 0.3))
-              : null,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon,
-                size: 16, color: active ? activeColor : Colors.grey.shade500),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: active ? activeColor : Colors.grey.shade500,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReasonPicker() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Reason for removal',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey.shade700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: RemoveReason.values.map((r) {
-            final selected = _selectedReason == r;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  if (_errorText != null) setState(() => _errorText = null);
-                  setState(() => _selectedReason = r);
+                      title: Text(item.product.name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      subtitle: !isAdd && item.reason != null
+                          ? Text(item.reason!.label, style: TextStyle(fontSize: 10, color: item.reason!.color))
+                          : null,
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+                        child: Text(isAdd ? '+${item.quantity}' : '-${item.quantity}',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: color)),
+                      ),
+                    ),
+                  );
                 },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? r.color.withValues(alpha: 0.1)
-                        : Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selected
-                          ? r.color.withValues(alpha: 0.4)
-                          : Colors.grey.shade200,
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        r.icon,
-                        size: 18,
-                        color: selected ? r.color : Colors.grey.shade400,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        r.label,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: selected ? r.color : Colors.grey.shade500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ),
-            );
-          }).toList(),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
-  Widget _buildPreviewRow(bool isAdd) {
-    final Color color = isAdd ? Colors.green : Colors.orange;
-    final newStock = _newStock;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.inventory_2, color: color, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '$_currentStock ${widget.product.unit}  →  $newStock ${widget.product.unit}',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color.lerp(color, Colors.black, 0.2),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  Future<void> _showScannerModeSheet() async {
+    final result = await showScannerModeSheet(context, isExternal: _scannerMode == _ScannerMode.external);
+    if (result == null || !mounted) return;
+    await _setScannerMode(result == ScannerChoice.external ? _ScannerMode.external : _ScannerMode.camera);
   }
 }

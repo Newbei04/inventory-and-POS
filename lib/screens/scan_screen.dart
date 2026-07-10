@@ -2,9 +2,10 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../db/database_helper.dart';
+import '../utils/scan_beep.dart';
 import '../utils/usb_scanner_service.dart';
 
 enum ScanMode { camera, photo, external }
@@ -21,78 +22,35 @@ class ScanScreen extends StatefulWidget {
 
   /// Shows a bottom sheet to pick Camera Scanner or External Scanner,
   /// then opens [ScanScreen] in the chosen mode.
+  /// If a default scan mode is saved in settings, skips the chooser.
   static Future<String?> pickAndScan(
     BuildContext context, {
     String title = 'Scan Barcode',
-  }) {
+  }) async {
+    final db = DatabaseHelper.instance;
+    final savedDefault = await db.getSetting('default_scan_mode');
+
+    if (savedDefault == 'camera' || savedDefault == 'external') {
+      if (!context.mounted) return null;
+      return Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ScanScreen(
+            title: title,
+            initialMode: savedDefault == 'external'
+                ? ScanMode.external
+                : ScanMode.camera,
+          ),
+        ),
+      );
+    }
+
     return showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Choose scan method',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 16),
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    Icons.qr_code_scanner,
-                    color: Colors.blue.shade700,
-                  ),
-                ),
-                title: const Text('Camera Scanner'),
-                subtitle: const Text('Scan barcodes using the device camera'),
-                onTap: () => Navigator.pop(ctx, 'camera'),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              const SizedBox(height: 4),
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.usb,
-                    color: Colors.green,
-                  ),
-                ),
-                title: const Text('USB Scanner'),
-                subtitle: const Text('Use a USB barcode scanner'),
-                onTap: () => Navigator.pop(ctx, 'external'),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      builder: (ctx) => _ScanMethodSheet(title: title),
     ).then((mode) {
       if (mode == null) return null;
       if (!context.mounted) return null;
@@ -112,6 +70,107 @@ class ScanScreen extends StatefulWidget {
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
+}
+
+class _ScanMethodSheet extends StatefulWidget {
+  const _ScanMethodSheet({required this.title});
+  final String title;
+
+  @override
+  State<_ScanMethodSheet> createState() => _ScanMethodSheetState();
+}
+
+class _ScanMethodSheetState extends State<_ScanMethodSheet> {
+  bool _setAsDefault = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Choose scan method',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.qr_code_scanner,
+                  color: Colors.blue.shade700,
+                ),
+              ),
+              title: const Text('Camera Scanner'),
+              subtitle: const Text('Scan barcodes using the device camera'),
+              onTap: () => _select('camera'),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            const SizedBox(height: 4),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.usb,
+                  color: Colors.green,
+                ),
+              ),
+              title: const Text('USB Scanner'),
+              subtitle: const Text('Use a USB barcode scanner'),
+              onTap: () => _select('external'),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Checkbox(
+                  value: _setAsDefault,
+                  onChanged: (v) => setState(() => _setAsDefault = v ?? false),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+                Text(
+                  'Set as default',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _select(String mode) async {
+    if (_setAsDefault) {
+      await DatabaseHelper.instance.setSetting('default_scan_mode', mode);
+    }
+    if (mounted) Navigator.pop(context, mode);
+  }
 }
 
 class _ScanScreenState extends State<ScanScreen>
@@ -146,6 +205,7 @@ class _ScanScreenState extends State<ScanScreen>
 
   void _onScannerBarcode(String barcode) {
     if (!mounted) return;
+    ScanBeep.play();
     setState(() => _scannerStatus = 'Scanned!');
     Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) Navigator.of(context).pop(barcode);
@@ -201,7 +261,7 @@ class _ScanScreenState extends State<ScanScreen>
     final value = barcodes.first.rawValue;
     if (value == null || value.isEmpty) return;
     _handled = true;
-    HapticFeedback.lightImpact();
+    ScanBeep.play();
     Navigator.of(context).pop(value);
   }
 
@@ -326,82 +386,18 @@ class _ScanScreenState extends State<ScanScreen>
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          PopupMenuButton<ScanMode>(
-            icon: const Icon(Icons.more_vert, color: _textBright),
-            onSelected: _setScanMode,
-            surfaceTintColor: _surfaceColor,
-            color: _surfaceColor,
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: ScanMode.camera,
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.qr_code_scanner,
-                      color: _scanMode == ScanMode.camera
-                          ? _accent
-                          : _textBright,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Camera Scanner',
-                      style: TextStyle(
-                        color: _scanMode == ScanMode.camera
-                            ? _accent
-                            : _textBright,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: ScanMode.photo,
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.camera_alt,
-                      color: _scanMode == ScanMode.photo
-                          ? _accent
-                          : _textBright,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Photo Capture',
-                      style: TextStyle(
-                        color: _scanMode == ScanMode.photo
-                            ? _accent
-                            : _textBright,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: ScanMode.external,
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.usb,
-                      color: _scanMode == ScanMode.external
-                          ? _accent
-                          : _textBright,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'External Scanner',
-                      style: TextStyle(
-                        color: _scanMode == ScanMode.external
-                            ? _accent
-                            : _textBright,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          IconButton(
+            icon: Icon(
+              _scanMode == ScanMode.external ? Icons.qr_code_scanner : Icons.usb,
+              color: _textBright,
+            ),
+            tooltip: _scanMode == ScanMode.external ? 'Switch to Camera' : 'Switch to USB',
+            onPressed: () {
+              final next = _scanMode == ScanMode.external
+                  ? ScanMode.camera
+                  : ScanMode.external;
+              _setScanMode(next);
+            },
           ),
         ],
       ),

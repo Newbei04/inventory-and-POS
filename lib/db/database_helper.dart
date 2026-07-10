@@ -265,7 +265,14 @@ class DatabaseHelper {
 
   /// Refund selected items from a receipt. [itemIndices] = null means all.
   /// Returns items that could NOT be fully refunded (inadequate stock).
-  Future<List<Map<String, dynamic>>> refundReceipt(int receiptId, {List<int>? itemIndices}) async {
+  /// Refund receipt items. [itemIndices] refunds full quantity per item.
+  /// [itemQuantities] maps item index → refund quantity (partial).
+  /// If both provided, itemQuantities takes precedence.
+  Future<List<Map<String, dynamic>>> refundReceipt(
+    int receiptId, {
+    List<int>? itemIndices,
+    Map<int, int>? itemQuantities,
+  }) async {
     final db = await database;
     final inadequate = <Map<String, dynamic>>[];
     await db.transaction((txn) async {
@@ -274,9 +281,19 @@ class DatabaseHelper {
       final receipt = Receipt.fromMap(rows.first);
       if (receipt.isVoided) return;
       final alreadyRefunded = receipt.refundedItemIndices;
-      final toRefund = itemIndices ?? List.generate(receipt.items.length, (i) => i);
+
+      final Map<int, int> qtyMap;
+      if (itemQuantities != null && itemQuantities.isNotEmpty) {
+        qtyMap = itemQuantities;
+      } else {
+        final toRefund = itemIndices ?? List.generate(receipt.items.length, (i) => i);
+        qtyMap = {for (final i in toRefund) i: receipt.items[i].quantity};
+      }
+
       final newlyRefunded = <int>{...alreadyRefunded};
-      for (final idx in toRefund) {
+      for (final entry in qtyMap.entries) {
+        final idx = entry.key;
+        final requestedQty = entry.value;
         if (idx < 0 || idx >= receipt.items.length) continue;
         if (alreadyRefunded.contains(idx)) continue;
         final item = receipt.items[idx];
@@ -287,7 +304,7 @@ class DatabaseHelper {
           continue;
         }
         final currentQty = (product.first['quantity'] as int?) ?? 0;
-        final refundQty = currentQty >= item.quantity ? item.quantity : currentQty;
+        final refundQty = currentQty >= requestedQty ? requestedQty : currentQty;
         final newQty = currentQty - refundQty;
         await txn.update('products', {
           'quantity': newQty,
@@ -311,7 +328,7 @@ class DatabaseHelper {
             'refunded': refundQty,
           });
         }
-        newlyRefunded.add(idx);
+        if (refundQty >= item.quantity) newlyRefunded.add(idx);
       }
       final allRefunded = newlyRefunded.length >= receipt.items.length;
       await txn.update('receipts', {
@@ -630,7 +647,7 @@ class DatabaseHelper {
   /// (e.g. two POS checkouts touching the same product) can't race each
   /// other between the read and the write, and a failure partway through
   /// rolls back automatically instead of leaving a partial update.
-  Future<int> adjustStock(int id, int deltaQuantity, {String reason = ''}) async {
+  Future<int> adjustStock(int id, int deltaQuantity, {String reason = '', String? type}) async {
     final db = await database;
     return db.transaction((txn) async {
       final rows =
@@ -648,13 +665,14 @@ class DatabaseHelper {
         where: 'id = ?',
         whereArgs: [id],
       );
+      final movementType = type ?? (deltaQuantity > 0 ? 'add' : 'sale');
       await txn.insert('stock_movements', {
         'product_id': id,
         'product_name': current.name,
         'old_quantity': current.quantity,
         'new_quantity': clamped,
         'delta': clamped - current.quantity,
-        'type': deltaQuantity > 0 ? 'add' : 'sale',
+        'type': movementType,
         'reason': reason,
         'date': DateTime.now().toIso8601String(),
       });

@@ -374,6 +374,7 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
     final dateStr = _formatDate(r.date);
     final isRefunded = r.isFullyRefunded;
     final isPartialRefund = r.isPartiallyRefunded;
+    final canAct = r.canModify && DateTime.now().difference(DateTime.parse(r.date)).inHours < 24;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       color: r.isVoided ? Colors.red.shade50 : isRefunded ? Colors.orange.shade50 : isPartialRefund ? Colors.orange.shade50 : null,
@@ -381,7 +382,7 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
         borderRadius: BorderRadius.circular(12),
         onTap: () => _viewReceipt(r),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
           child: Row(
             children: [
               Container(
@@ -479,6 +480,29 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                       color: Colors.grey.shade500,
                     ),
                   ),
+                ],
+              ),
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
+                padding: EdgeInsets.zero,
+                splashRadius: 18,
+                onSelected: (value) {
+                  if (value == 'view') _viewReceipt(r);
+                  if (value == 'void') _standaloneVoid(r);
+                  if (value == 'refund') _standaloneRefund(r);
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'view', child: Row(children: [Icon(Icons.visibility_outlined, size: 18), SizedBox(width: 10), Text('View')])),
+                  if (canAct && !r.isVoided && !isRefunded)
+                    PopupMenuItem(
+                      value: 'void',
+                      child: Row(children: [Icon(Icons.cancel_outlined, size: 18, color: Colors.red.shade400), const SizedBox(width: 10), Text('Void', style: TextStyle(color: Colors.red.shade400))]),
+                    ),
+                  if (canAct && !r.isVoided && !isRefunded)
+                    PopupMenuItem(
+                      value: 'refund',
+                      child: Row(children: [Icon(Icons.replay, size: 18, color: Colors.orange.shade600), const SizedBox(width: 10), Text('Refund', style: TextStyle(color: Colors.orange.shade600))]),
+                    ),
                 ],
               ),
             ],
@@ -881,6 +905,226 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
               content: Text(isPartial
                   ? '$count item(s) refunded — stock deducted'
                   : 'Receipt #${r.receiptNo} refunded — stock deducted'),
+              backgroundColor: Colors.orange.shade700,
+            ),
+          );
+        } else {
+          final names = inadequate.map((i) {
+            final refundedQty = i['refunded'] as int? ?? 0;
+            final sold = i['sold'] as int;
+            if (refundedQty == 0) return '${i['name']} (0/$sold)';
+            return '${i['name']} ($refundedQty/$sold)';
+          }).join(', ');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Partial refund: $names'),
+              backgroundColor: Colors.orange.shade900,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _standaloneVoid(Receipt r) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 40),
+        title: const Text('Void Receipt?'),
+        content: Text(
+          'This will mark receipt #${r.receiptNo} as voided and restore ${r.items.length} product(s) back to inventory. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Void'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true && mounted) {
+      await _db.voidReceipt(r.id!);
+      _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Receipt #${r.receiptNo} voided — stock restored'),
+            backgroundColor: Colors.orange.shade700,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _standaloneRefund(Receipt r) async {
+    final selected = <int>{};
+    final qtys = <int, int>{};
+    for (var i = 0; i < r.items.length; i++) {
+      if (!r.refundedItemIndices.contains(i)) {
+        qtys[i] = r.items[i].quantity;
+      }
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final totalUnits = selected.fold<int>(0, (s, i) => s + (qtys[i] ?? 0));
+          final totalAmount = selected.fold<double>(0, (s, i) => s + r.items[i].price * (qtys[i] ?? 0));
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.replay, color: Colors.orange, size: 24),
+                const SizedBox(width: 10),
+                const Expanded(child: Text('Refund Items')),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (selected.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, size: 16, color: Colors.orange.shade700),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${selected.length} item${selected.length == 1 ? '' : 's'} · $totalUnits unit${totalUnits == 1 ? '' : 's'} · ₱${totalAmount.toStringAsFixed(2)}',
+                              style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: r.items.length,
+                      itemBuilder: (_, i) {
+                        final item = r.items[i];
+                        final alreadyRefunded = r.refundedItemIndices.contains(i);
+                        final isSelected = selected.contains(i);
+                        final maxQty = item.quantity;
+                        final currentQty = qtys[i] ?? maxQty;
+                        return Opacity(
+                          opacity: alreadyRefunded ? 0.5 : 1,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                if (alreadyRefunded)
+                                  Icon(Icons.check_circle, size: 20, color: Colors.orange.shade500)
+                                else
+                                  Checkbox(
+                                    value: isSelected,
+                                    onChanged: (v) {
+                                      setDialogState(() {
+                                        if (v == true) {
+                                          selected.add(i);
+                                          qtys[i] = maxQty;
+                                        } else {
+                                          selected.remove(i);
+                                        }
+                                      });
+                                    },
+                                  ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item.productName,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          decoration: alreadyRefunded ? TextDecoration.lineThrough : null,
+                                          color: alreadyRefunded ? Colors.grey : null,
+                                        ),
+                                      ),
+                                      Text(
+                                        alreadyRefunded ? 'Refunded' : '₱${item.price.toStringAsFixed(2)} × $maxQty',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: alreadyRefunded ? Colors.orange.shade500 : Colors.grey.shade500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (!alreadyRefunded && isSelected) ...[
+                                  IconButton(
+                                    onPressed: currentQty > 1
+                                        ? () => setDialogState(() => qtys[i] = currentQty - 1)
+                                        : null,
+                                    icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                  ),
+                                  Text(
+                                    '$currentQty',
+                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                  ),
+                                  IconButton(
+                                    onPressed: currentQty < maxQty
+                                        ? () => setDialogState(() => qtys[i] = currentQty + 1)
+                                        : null,
+                                    icon: const Icon(Icons.add_circle_outline, size: 20),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: selected.isEmpty
+                    ? null
+                    : () => Navigator.pop(dCtx, true),
+                style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+                child: Text('Refund ${selected.length} Item${selected.length == 1 ? '' : 's'}'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final itemQuantities = <int, int>{};
+      for (final i in selected) {
+        itemQuantities[i] = qtys[i] ?? r.items[i].quantity;
+      }
+      final inadequate = await _db.refundReceipt(r.id!, itemQuantities: itemQuantities);
+      _load();
+      if (mounted) {
+        if (inadequate.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${selected.length} item(s) refunded — stock deducted'),
               backgroundColor: Colors.orange.shade700,
             ),
           );

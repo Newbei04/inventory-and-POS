@@ -227,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onRefresh: () async => _loadProducts(),
                   child: _gridView
                       ? GridView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 2,
                             mainAxisSpacing: 10,
@@ -238,7 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           itemBuilder: (context, index) => _buildGridItem(products[index]),
                         )
                       : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
                           itemCount: products.length,
                           itemBuilder: (context, index) => _buildListItem(products[index]),
                         ),
@@ -627,6 +627,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+            const SizedBox(height: 16), // <-- space added below
           ],
         ),
       ),

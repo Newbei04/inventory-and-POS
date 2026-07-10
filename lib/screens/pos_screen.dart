@@ -10,6 +10,7 @@ import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../models/receipt.dart';
 import '../utils/usb_scanner_service.dart';
+import '../widgets/store_receipt_header.dart';
 import 'scan_screen.dart';
 
 class CartItem {
@@ -484,120 +485,125 @@ class _PosScreenState extends State<PosScreen> {
       context: context,
       useSafeArea: false,
       builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.all(16),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 32, 24, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Price Checker',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
-                  letterSpacing: 1,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Receipt #$receiptNo',
-                style: TextStyle(
-                  color: Colors.grey.shade500,
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 24),
-              ..._cart.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(28, 36, 28, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const StoreReceiptHeader(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'SALE RECEIPT',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      letterSpacing: 2,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Receipt #$receiptNo',
+                    style: TextStyle(
+                      color: Colors.grey.shade400,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ..._cart.map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  item.product.name,
+                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                              Text(
+                                '₱${item.total.toStringAsFixed(2)}',
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '${item.quantity} × ₱${item.product.price.toStringAsFixed(2)}',
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(
-                        child: Text(
-                          item.product.name,
-                          style: const TextStyle(fontSize: 14),
-                        ),
+                      const Text(
+                        'TOTAL',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                       Text(
-                        '${item.quantity} × ₱${item.product.price.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        width: 72,
-                        child: Text(
-                          '₱${item.total.toStringAsFixed(2)}',
-                          textAlign: TextAlign.right,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w500,
-                            fontSize: 14,
-                          ),
+                        '₱${_total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 20,
                         ),
                       ),
                     ],
                   ),
-                ),
-              ),
-              const Divider(height: 16),
-              const Divider(height: 1),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'TOTAL',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Cash', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                      Text('₱${cash.toStringAsFixed(2)}',
+                          style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+                    ],
                   ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Change', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                      Text(
+                        '₱${change.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: change >= 0 ? Colors.green : Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
                   Text(
-                    '₱${_total.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
+                    DateFormat('MMM d, yyyy  h:mm a').format(now),
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontFamily: 'monospace'),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Done', style: TextStyle(fontSize: 15)),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Cash', style: TextStyle(color: Colors.grey.shade600)),
-                  Text('₱${cash.toStringAsFixed(2)}',
-                      style: const TextStyle(fontWeight: FontWeight.w500)),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Change', style: TextStyle(color: Colors.grey.shade600)),
-                  Text(
-                    '₱${change.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: change >= 0 ? Colors.green : Colors.red,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                DateFormat('MMM d, yyyy  h:mm a').format(now),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontFamily: 'monospace'),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Done'),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

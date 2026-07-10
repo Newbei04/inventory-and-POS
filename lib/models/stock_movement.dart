@@ -5,7 +5,8 @@ class StockMovement {
   int oldQuantity;
   int newQuantity;
   int delta;
-  String type; // 'add', 'sale', 'adjustment'
+  String type;
+  String reason;
   String date;
 
   StockMovement({
@@ -16,6 +17,7 @@ class StockMovement {
     required this.newQuantity,
     required this.delta,
     required this.type,
+    this.reason = '',
     required this.date,
   });
 
@@ -28,6 +30,7 @@ class StockMovement {
       newQuantity: json['new_quantity'] ?? 0,
       delta: json['delta'] ?? 0,
       type: json['type'] ?? 'adjustment',
+      reason: json['reason'] ?? '',
       date: json['date'],
     );
   }
@@ -41,6 +44,7 @@ class StockMovement {
       'new_quantity': newQuantity,
       'delta': delta,
       'type': type,
+      'reason': reason,
       'date': date,
     };
   }

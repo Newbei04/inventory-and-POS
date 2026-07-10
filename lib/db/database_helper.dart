@@ -16,8 +16,13 @@ class DatabaseHelper {
 
   static Database? _db;
 
+  /// Force a fresh connection on each cold start.
+  static void resetInstance() {
+    _db = null;
+  }
+
   Future<Database> get database async {
-    if (_db != null) return _db!;
+    if (_db != null && _db!.isOpen) return _db!;
     _db = await _initDb();
     return _db!;
   }
@@ -27,7 +32,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'inventory_scanner.db');
     return openDatabase(
       path,
-      version: 5,
+      version: 8,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE products (
@@ -52,23 +57,46 @@ class DatabaseHelper {
         await _createReceiptsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          try {
-            await db.execute(
-              "ALTER TABLE products ADD COLUMN image_path TEXT DEFAULT ''",
-            );
-          } catch (_) {}
-          await _createStockMovementsTable(db);
-        }
-        if (oldVersion < 3) {
-          await _createPriceChangesTable(db);
-        }
-        if (oldVersion < 4) {
-          await _createSettingsTable(db);
-        }
-        if (oldVersion < 5) {
-          await _createReceiptsTable(db);
-        }
+        try {
+          if (oldVersion < 2) {
+            try {
+              await db.execute(
+                "ALTER TABLE products ADD COLUMN image_path TEXT DEFAULT ''",
+              );
+            } catch (_) {}
+            await _createStockMovementsTable(db);
+          }
+          if (oldVersion < 3) {
+            await _createPriceChangesTable(db);
+          }
+          if (oldVersion < 4) {
+            await _createSettingsTable(db);
+          }
+          if (oldVersion < 5) {
+            await _createReceiptsTable(db);
+          }
+          if (oldVersion < 6) {
+            try {
+              await db.execute(
+                "ALTER TABLE stock_movements ADD COLUMN reason TEXT DEFAULT ''",
+              );
+            } catch (_) {}
+          }
+          if (oldVersion < 7) {
+            try {
+              await db.execute(
+                "ALTER TABLE stock_movements ADD COLUMN reason TEXT DEFAULT ''",
+              );
+            } catch (_) {}
+          }
+          if (oldVersion < 8) {
+            try {
+              await db.execute(
+                "ALTER TABLE receipts ADD COLUMN is_voided INTEGER NOT NULL DEFAULT 0",
+              );
+            } catch (_) {}
+          }
+        } catch (_) {}
       },
     );
   }
@@ -83,6 +111,7 @@ class DatabaseHelper {
         new_quantity INTEGER NOT NULL,
         delta INTEGER NOT NULL,
         type TEXT NOT NULL DEFAULT 'adjustment',
+        reason TEXT DEFAULT '',
         date TEXT NOT NULL
       )
     ''');
@@ -167,6 +196,7 @@ class DatabaseHelper {
         total REAL NOT NULL,
         cash REAL NOT NULL,
         change REAL NOT NULL,
+        is_voided INTEGER NOT NULL DEFAULT 0,
         items_json TEXT NOT NULL,
         date TEXT NOT NULL
       )
@@ -179,6 +209,42 @@ class DatabaseHelper {
   Future<int> insertReceipt(Receipt receipt) async {
     final db = await database;
     return db.insert('receipts', receipt.toMap());
+  }
+
+  /// Void a receipt: mark it as voided and restore stock quantities.
+  /// Returns the number of products whose stock was restored.
+  Future<int> voidReceipt(int receiptId) async {
+    final db = await database;
+    int restored = 0;
+    await db.transaction((txn) async {
+      final rows = await txn.query('receipts', where: 'id = ?', whereArgs: [receiptId], limit: 1);
+      if (rows.isEmpty) return;
+      final receipt = Receipt.fromMap(rows.first);
+      if (receipt.isVoided) return;
+      await txn.update('receipts', {'is_voided': 1}, where: 'id = ?', whereArgs: [receiptId]);
+      for (final item in receipt.items) {
+        final product = await txn.query('products', where: 'id = ?', whereArgs: [item.productId], limit: 1);
+        if (product.isEmpty) continue;
+        final currentQty = (product.first['quantity'] as int?) ?? 0;
+        final restoredQty = currentQty + item.quantity;
+        await txn.update('products', {
+          'quantity': restoredQty,
+          'date_updated': DateTime.now().toIso8601String(),
+        }, where: 'id = ?', whereArgs: [item.productId]);
+        await txn.insert('stock_movements', {
+          'product_id': item.productId,
+          'product_name': item.productName,
+          'old_quantity': currentQty,
+          'new_quantity': restoredQty,
+          'delta': item.quantity,
+          'type': 'void',
+          'reason': 'Voided receipt #${receipt.receiptNo}',
+          'date': DateTime.now().toIso8601String(),
+        });
+        restored++;
+      }
+    });
+    return restored;
   }
 
   Future<List<Receipt>> getAllReceipts({int? limit}) async {
@@ -206,13 +272,13 @@ class DatabaseHelper {
 
   Future<double> getTotalSales({DateTime? from, DateTime? to}) async {
     final db = await database;
-    String query = 'SELECT COALESCE(SUM(total), 0) AS total FROM receipts';
+    String query = 'SELECT COALESCE(SUM(total), 0) AS total FROM receipts WHERE is_voided = 0';
     List<dynamic> args = [];
     if (from != null && to != null) {
-      query += ' WHERE date >= ? AND date <= ?';
+      query += ' AND date >= ? AND date <= ?';
       args = [from.toIso8601String(), to.toIso8601String()];
     } else if (from != null) {
-      query += ' WHERE date >= ?';
+      query += ' AND date >= ?';
       args = [from.toIso8601String()];
     }
     final result = await db.rawQuery(query, args);
@@ -221,13 +287,13 @@ class DatabaseHelper {
 
   Future<int> getTransactionCount({DateTime? from, DateTime? to}) async {
     final db = await database;
-    String query = 'SELECT COUNT(*) AS c FROM receipts';
+    String query = 'SELECT COUNT(*) AS c FROM receipts WHERE is_voided = 0';
     List<dynamic> args = [];
     if (from != null && to != null) {
-      query += ' WHERE date >= ? AND date <= ?';
+      query += ' AND date >= ? AND date <= ?';
       args = [from.toIso8601String(), to.toIso8601String()];
     } else if (from != null) {
-      query += ' WHERE date >= ?';
+      query += ' AND date >= ?';
       args = [from.toIso8601String()];
     }
     final result = await db.rawQuery(query, args);
@@ -239,6 +305,7 @@ class DatabaseHelper {
     final receipts = await getAllReceipts();
     final aggregated = <String, Map<String, dynamic>>{};
     for (final r in receipts) {
+      if (r.isVoided) continue;
       for (final item in r.items) {
         aggregated.putIfAbsent(item.productName, () => {
           'product_name': item.productName,
@@ -345,6 +412,7 @@ class DatabaseHelper {
           'new_quantity': product.quantity,
           'delta': product.quantity - existing.quantity,
           'type': product.quantity > existing.quantity ? 'restock' : 'adjustment',
+          'reason': '',
           'date': DateTime.now().toIso8601String(),
         });
       }
@@ -487,7 +555,7 @@ class DatabaseHelper {
   /// (e.g. two POS checkouts touching the same product) can't race each
   /// other between the read and the write, and a failure partway through
   /// rolls back automatically instead of leaving a partial update.
-  Future<int> adjustStock(int id, int deltaQuantity) async {
+  Future<int> adjustStock(int id, int deltaQuantity, {String reason = ''}) async {
     final db = await database;
     return db.transaction((txn) async {
       final rows =
@@ -512,6 +580,7 @@ class DatabaseHelper {
         'new_quantity': clamped,
         'delta': clamped - current.quantity,
         'type': deltaQuantity > 0 ? 'add' : 'sale',
+        'reason': reason,
         'date': DateTime.now().toIso8601String(),
       });
       return clamped;
@@ -526,6 +595,7 @@ class DatabaseHelper {
     required int oldQuantity,
     required int newQuantity,
     String type = 'adjustment',
+    String reason = '',
   }) async {
     await _logMovement(
       productId: productId,
@@ -533,6 +603,7 @@ class DatabaseHelper {
       oldQuantity: oldQuantity,
       newQuantity: newQuantity,
       type: type,
+      reason: reason,
     );
   }
 
@@ -542,6 +613,7 @@ class DatabaseHelper {
     required int oldQuantity,
     required int newQuantity,
     required String type,
+    String reason = '',
   }) async {
     final db = await database;
     await db.insert('stock_movements', {
@@ -551,6 +623,7 @@ class DatabaseHelper {
       'new_quantity': newQuantity,
       'delta': newQuantity - oldQuantity,
       'type': type,
+      'reason': reason,
       'date': DateTime.now().toIso8601String(),
     });
   }

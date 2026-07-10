@@ -32,7 +32,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
   FlashMode get _captureFlashMode {
     switch (_flashMode) {
       case FlashModeOption.flash:
-        return FlashMode.always;
+        return FlashMode.auto;
       case FlashModeOption.noFlash:
         return FlashMode.off;
       case FlashModeOption.torch:

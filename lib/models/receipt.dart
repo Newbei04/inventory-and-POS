@@ -45,7 +45,10 @@ class Receipt {
   double cash;
   double change;
   String date;
+  bool isVoided;
   List<ReceiptItem> items;
+
+  int get totalItemsQty => items.fold(0, (sum, i) => sum + i.quantity);
 
   Receipt({
     this.id,
@@ -56,6 +59,7 @@ class Receipt {
     required this.cash,
     required this.change,
     required this.date,
+    this.isVoided = false,
     required this.items,
   });
 
@@ -67,6 +71,7 @@ class Receipt {
     'cash': cash,
     'change': change,
     'date': date,
+    'is_voided': isVoided ? 1 : 0,
     'items_json': jsonEncode(items.map((i) => i.toMap()).toList()),
   };
 
@@ -84,6 +89,7 @@ class Receipt {
       cash: (m['cash'] ?? 0).toDouble(),
       change: (m['change'] ?? 0).toDouble(),
       date: m['date'],
+      isVoided: (m['is_voided'] ?? 0) == 1,
       items: itemsList,
     );
   }

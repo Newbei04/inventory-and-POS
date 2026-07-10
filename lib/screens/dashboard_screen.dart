@@ -7,6 +7,7 @@ import '../models/product.dart';
 import '../models/stock_movement.dart';
 import 'add_edit_product_screen.dart';
 import 'inventory_screen.dart';
+import 'inventory_v2_screen.dart';
 import 'price_check_v2_screen.dart';
 import 'pos_screen.dart';
 import 'receipts_screen.dart';
@@ -180,12 +181,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           const SizedBox(height: 18),
-          Row(
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
             children: [
               _heroChip(Icons.inventory, '$_productCount products'),
-              const SizedBox(width: 10),
               _heroChip(Icons.category, '${_categories.length} categories'),
-              const SizedBox(width: 10),
               _heroChip(Icons.shopping_bag, '$_totalQty total qty'),
             ],
           ),
@@ -379,6 +380,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 12),
+        _actionCard(
+          icon: Icons.qr_code_scanner,
+          label: 'Inventory Count',
+          subtitle: 'Scan barcodes and enter physical count',
+          color: Colors.deepPurple,
+          bgColor: Colors.deepPurple.shade50,
+          onTap: () => Navigator.push(
+            context,
+            slideIn(const InventoryV2Screen()),
+          ),
         ),
       ],
     );

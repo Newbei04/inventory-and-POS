@@ -3,8 +3,9 @@ import 'package:intl/intl.dart';
 
 import '../db/database_helper.dart';
 import '../models/receipt.dart';
+import '../widgets/store_receipt_header.dart';
 
-enum ReceiptPeriod { today, week, month, all }
+enum ReceiptPeriod { today, week, month, custom, all }
 
 class ReceiptsScreen extends StatefulWidget {
   const ReceiptsScreen({super.key});
@@ -20,6 +21,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
   List<Receipt> _filtered = [];
   bool _loading = true;
   ReceiptPeriod _period = ReceiptPeriod.all;
+  DateTimeRange? _customRange;
+  int _statusFilter = 0; // 0=All, 1=Active, 2=Voided
 
   @override
   void initState() {
@@ -73,6 +76,14 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
         return d.isAfter(monthStart.subtract(const Duration(seconds: 1))) &&
             d.isBefore(monthEnd);
       }).toList();
+    } else if (_period == ReceiptPeriod.custom && _customRange != null) {
+      final rangeStart = DateTime(_customRange!.start.year, _customRange!.start.month, _customRange!.start.day);
+      final rangeEnd = _customRange!.end.add(const Duration(days: 1));
+      filtered = filtered.where((r) {
+        final d = DateTime.parse(r.date);
+        return d.isAfter(rangeStart.subtract(const Duration(seconds: 1))) &&
+            d.isBefore(rangeEnd);
+      }).toList();
     }
 
     // Search filter
@@ -80,6 +91,13 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
     if (q.isNotEmpty) {
       filtered = filtered.where((r) =>
           r.receiptNo.toLowerCase().contains(q)).toList();
+    }
+
+    // Status filter
+    if (_statusFilter == 1) {
+      filtered = filtered.where((r) => !r.isVoided).toList();
+    } else if (_statusFilter == 2) {
+      filtered = filtered.where((r) => r.isVoided).toList();
     }
 
     if (!mounted) return;
@@ -129,14 +147,86 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
               children: [
                 _periodChip('Today', ReceiptPeriod.today),
                 const SizedBox(width: 6),
-                _periodChip('This Week', ReceiptPeriod.week),
+                _periodChip('Week', ReceiptPeriod.week),
                 const SizedBox(width: 6),
-                _periodChip('This Month', ReceiptPeriod.month),
+                _periodChip('Month', ReceiptPeriod.month),
+                const SizedBox(width: 6),
+                _periodChip('Custom', ReceiptPeriod.custom),
                 const SizedBox(width: 6),
                 _periodChip('All', ReceiptPeriod.all),
               ],
             ),
           ),
+          // Custom date range picker
+          if (_period == ReceiptPeriod.custom)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: InkWell(
+                onTap: _pickDateRange,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.blue.shade200),
+                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.blue.shade50,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.date_range, size: 18, color: Colors.blue.shade600),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _customRange != null
+                              ? '${DateFormat('MMM d, yyyy').format(_customRange!.start)} — ${DateFormat('MMM d, yyyy').format(_customRange!.end)}'
+                              : 'Pick date range...',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: _customRange != null ? Colors.blue.shade700 : Colors.grey.shade500,
+                          ),
+                        ),
+                      ),
+                      if (_customRange != null)
+                        Icon(Icons.close, size: 16, color: Colors.grey.shade500),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          // Status filter
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Row(
+              children: [
+                _statusChip('All', 0, Icons.receipt_long, Colors.blue),
+                const SizedBox(width: 6),
+                _statusChip('Active', 1, Icons.check_circle_outline, Colors.green),
+                const SizedBox(width: 6),
+                _statusChip('Voided', 2, Icons.cancel_outlined, Colors.red),
+              ],
+            ),
+          ),
+          // Summary bar
+          if (!_loading && _allReceipts.isNotEmpty && _filtered.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    _summaryStat('${_filtered.length}', 'receipts'),
+                    _summaryDivider(),
+                    _summaryStat('${_filtered.fold(0, (s, r) => s + r.totalItemsQty)}', 'items'),
+                    _summaryDivider(),
+                    _summaryStat('₱${_filtered.fold(0.0, (s, r) => s + r.total).toStringAsFixed(2)}', 'total'),
+                  ],
+                ),
+              ),
+            ),
           // Body
           Expanded(
             child: RefreshIndicator(
@@ -241,10 +331,46 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
     );
   }
 
+  Widget _statusChip(String label, int value, IconData icon, MaterialColor color) {
+    final selected = _statusFilter == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setState(() => _statusFilter = value);
+          _applyFilters();
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? color.shade100 : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(20),
+            border: selected ? Border.all(color: color.shade400, width: 1.5) : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 14, color: selected ? color.shade700 : Colors.grey.shade500),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                  color: selected ? color.shade700 : Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _receiptCard(Receipt r) {
     final dateStr = _formatDate(r.date);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
+      color: r.isVoided ? Colors.red.shade50 : null,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () => _viewReceipt(r),
@@ -255,12 +381,12 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: r.isVoided ? Colors.red.shade50 : Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  Icons.receipt_long,
-                  color: Colors.blue.shade600,
+                  r.isVoided ? Icons.cancel_outlined : Icons.receipt_long,
+                  color: r.isVoided ? Colors.red.shade400 : Colors.blue.shade600,
                   size: 24,
                 ),
               ),
@@ -269,16 +395,38 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Receipt #${r.receiptNo}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          'Receipt #${r.receiptNo}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
+                        ),
+                        if (r.isVoided) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade100,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'VOID',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.red.shade700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${r.items.length} items',
+                      '${r.items.length} line${r.items.length == 1 ? '' : 's'}  ·  ${r.totalItemsQty} unit${r.totalItemsQty == 1 ? '' : 's'}',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey.shade600,
@@ -295,7 +443,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      color: Colors.blue.shade700,
+                      color: r.isVoided ? Colors.red.shade400 : Colors.blue.shade700,
+                      decoration: r.isVoided ? TextDecoration.lineThrough : null,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -320,113 +469,299 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
       context: context,
       useSafeArea: false,
       builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.all(16),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.receipt_long, size: 48, color: Colors.blue.shade600),
-              const SizedBox(height: 8),
-              const Text(
-                'SALE RECEIPT',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Receipt #${r.receiptNo}',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-              ),
-              const Divider(height: 24),
-              ...r.items.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${item.productName} x ${item.quantity}',
-                          style: const TextStyle(fontSize: 14),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: StatefulBuilder(
+            builder: (ctx, setDialogState) => Stack(
+              children: [
+                SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(28, 36, 28, 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const StoreReceiptHeader(),
+                        const SizedBox(height: 16),
+                        Text(
+                          'SALE RECEIPT',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            letterSpacing: 2,
+                            color: Colors.grey.shade600,
+                          ),
                         ),
-                      ),
-                      Text(
-                        '₱${item.total.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14,
+                        const SizedBox(height: 4),
+                        Text(
+                          'Receipt #${r.receiptNo}',
+                          style: TextStyle(
+                            color: Colors.grey.shade400,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Divider(height: 12),
-              const Divider(height: 1),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'TOTAL',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  Text(
-                    '₱${r.total.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
+                        const SizedBox(height: 20),
+                        ...r.items.map(
+                          (item) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Column(
+                              children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        item.productName,
+                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                                      ),
+                                    ),
+                                    Text(
+                                      '₱${item.total.toStringAsFixed(2)}',
+                                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    '${item.quantity} × ₱${item.price.toStringAsFixed(2)}',
+                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            Text(
+                              '₱${r.total.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 20,
+                                decoration: r.isVoided ? TextDecoration.lineThrough : null,
+                                color: r.isVoided ? Colors.red : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '${r.totalItemsQty} total unit${r.totalItemsQty == 1 ? '' : 's'}  ·  ${r.items.length} line${r.items.length == 1 ? '' : 's'}',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Cash', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                            Text('₱${r.cash.toStringAsFixed(2)}',
+                                style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+                          ],
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Change', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                            Text(
+                              '₱${r.change.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: r.change >= 0 ? Colors.green : Colors.red,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          DateFormat('MMM d, yyyy  h:mm a').format(DateTime.parse(r.date)),
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontFamily: 'monospace'),
+                        ),
+                        const SizedBox(height: 20),
+                        if (!r.isVoided)
+                          if (DateTime.now().difference(DateTime.parse(r.date)).inHours < 24)
+                            SizedBox(
+                              width: double.infinity,
+                              height: 48,
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.cancel_outlined, size: 20),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red,
+                                  side: BorderSide(color: Colors.red.shade300),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                onPressed: () => _confirmVoid(ctx, r, setDialogState),
+                                label: const Text('Void Receipt', style: TextStyle(fontSize: 15)),
+                              ),
+                            )
+                          else
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'Void window expired (24h limit)',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+                              ),
+                            )
+                        else
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.red.shade200),
+                            ),
+                            child: Text(
+                              'This receipt has been voided',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 48,
+                          child: FilledButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Close', style: TextStyle(fontSize: 15)),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              _receiptRow('Cash', r.cash),
-              _receiptRow(
-                'Change',
-                r.change,
-                valueStyle: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: r.change >= 0 ? Colors.green : Colors.red,
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                DateFormat('MMM d, yyyy  h:mm a')
-                    .format(DateTime.parse(r.date)),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey.shade400,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Close'),
-                ),
-              ),
-            ],
+                if (r.isVoided)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Center(
+                        child: Transform.rotate(
+                          angle: -0.5,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.red.shade400, width: 4),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              'VOID',
+                              style: TextStyle(
+                                fontSize: 48,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.red.shade300,
+                                letterSpacing: 8,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _receiptRow(String label, double amount, {TextStyle? valueStyle}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(color: Colors.grey.shade600)),
-          Text(
-            '₱${amount.toStringAsFixed(2)}',
-            style: valueStyle ?? const TextStyle(fontWeight: FontWeight.w500),
+  Future<void> _confirmVoid(BuildContext ctx, Receipt r, StateSetter setDialogState) async {
+    final confirm = await showDialog<bool>(
+      context: ctx,
+      builder: (dCtx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 40),
+        title: const Text('Void Receipt?'),
+        content: Text(
+          'This will mark receipt #${r.receiptNo} as voided and restore ${r.items.length} product(s) back to inventory. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Void'),
           ),
         ],
       ),
+    );
+    if (confirm == true && ctx.mounted) {
+      await _db.voidReceipt(r.id!);
+      if (!ctx.mounted) return;
+      Navigator.pop(ctx);
+      _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Receipt #${r.receiptNo} voided — stock restored'),
+            backgroundColor: Colors.orange.shade700,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickDateRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: now.add(const Duration(days: 1)),
+      initialDateRange: _customRange,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(primary: Colors.blue),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() => _customRange = picked);
+      _applyFilters();
+    } else if (_customRange == null) {
+      setState(() => _period = ReceiptPeriod.all);
+    }
+  }
+
+  Widget _summaryStat(String value, String label) {
+    return Expanded(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          Text(
+            label,
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryDivider() {
+    return Container(
+      width: 1,
+      height: 24,
+      color: Colors.grey.shade300,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
     );
   }
 

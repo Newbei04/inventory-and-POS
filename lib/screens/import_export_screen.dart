@@ -15,7 +15,6 @@ class ImportExportScreen extends StatefulWidget {
 class _ImportExportScreenState extends State<ImportExportScreen> {
   final _dbHelper = DatabaseHelper.instance;
   bool _loading = false;
-  bool _templateLoading = false;
 
   @override
   void initState() {
@@ -334,7 +333,6 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   }
 
   Future<void> _downloadTemplate() async {
-    setState(() => _templateLoading = true);
     try {
       final path = await ExportImportHelper.downloadTemplate();
       if (mounted) _showExportSuccess(path);
@@ -344,8 +342,6 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to save template: $e')));
       }
-    } finally {
-      if (mounted) setState(() => _templateLoading = false);
     }
   }
 

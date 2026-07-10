@@ -6,6 +6,7 @@ import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/product.dart';
@@ -23,11 +24,22 @@ class ExportImportHelper {
     // No directory chosen yet — use a sensible default
     Directory? dir;
     if (Platform.isAndroid) {
-      try {
-        dir = Directory('/storage/emulated/0/Download/price_checker');
-        if (!dir.existsSync()) dir.createSync(recursive: true);
-      } catch (_) {
-        dir = null;
+      // Request manage-external-storage on Android 11+
+      final status = await Permission.manageExternalStorage.status;
+      if (!status.isGranted) {
+        final result = await Permission.manageExternalStorage.request();
+        if (!result.isGranted) {
+          // Permission denied — fall back to app documents
+          dir = null;
+        }
+      }
+      if (dir == null) {
+        try {
+          dir = Directory('/storage/emulated/0/Download/price_checker');
+          if (!dir.existsSync()) dir.createSync(recursive: true);
+        } catch (_) {
+          dir = null;
+        }
       }
     }
     if (dir == null) {
@@ -53,6 +65,11 @@ class ExportImportHelper {
     if (!dir.existsSync()) dir.createSync(recursive: true);
     _exportsDir = dir;
     return true;
+  }
+
+  /// Clear cached export directory so next export re-prompts for permission.
+  static void resetExportsDir() {
+    _exportsDir = null;
   }
 
   static String getExportsDirPath() {
@@ -245,6 +262,7 @@ class ExportImportHelper {
       TextCellValue('new_quantity'),
       TextCellValue('delta'),
       TextCellValue('type'),
+      TextCellValue('reason'),
       TextCellValue('date'),
     ]);
     for (final m in movements) {
@@ -256,6 +274,7 @@ class ExportImportHelper {
         IntCellValue(m.newQuantity),
         IntCellValue(m.delta),
         TextCellValue(m.type),
+        TextCellValue(m.reason),
         TextCellValue(m.date),
       ]);
     }
@@ -310,10 +329,10 @@ class ExportImportHelper {
   static String _stockMovementsToCSV(List<StockMovement> movements) {
     final rows = <List<dynamic>>[
       ['id', 'product_id', 'product_name', 'old_quantity', 'new_quantity',
-       'delta', 'type', 'date'],
+       'delta', 'type', 'reason', 'date'],
       for (final m in movements)
         [m.id, m.productId, m.productName, m.oldQuantity, m.newQuantity,
-         m.delta, m.type, m.date],
+         m.delta, m.type, m.reason, m.date],
     ];
     return const ListToCsvConverter().convert(rows);
   }
@@ -338,6 +357,7 @@ class ExportImportHelper {
       'new_quantity': m.newQuantity,
       'delta': m.delta,
       'type': m.type,
+      'reason': m.reason,
       'date': m.date,
     }).toList();
     return const JsonEncoder.withIndent('  ').convert(data);
@@ -369,6 +389,7 @@ class ExportImportHelper {
       TextCellValue('new_quantity'),
       TextCellValue('delta'),
       TextCellValue('type'),
+      TextCellValue('reason'),
       TextCellValue('date'),
     ]);
 
@@ -381,6 +402,7 @@ class ExportImportHelper {
         IntCellValue(m.newQuantity),
         IntCellValue(m.delta),
         TextCellValue(m.type),
+        TextCellValue(m.reason),
         TextCellValue(m.date),
       ]);
     }

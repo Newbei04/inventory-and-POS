@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:price_checker/utils/app_lifecycle.dart';
 import 'package:price_checker/screens/dashboard_screen.dart';
 import 'package:price_checker/screens/home_screen.dart';
-import 'package:price_checker/screens/import_export_screen.dart';
+import 'package:price_checker/screens/settings_screen.dart';
 import 'package:price_checker/screens/price_check_screen.dart';
 import 'package:price_checker/screens/stock_logs_screen.dart';
 
@@ -23,7 +23,7 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
     HomeScreen(),
     PriceCheckScreen(),
     StockLogsScreen(),
-    ImportExportScreen(),
+    SettingsScreen(),
   ];
 
   late final List<AnimationController> _pulseControllers;
@@ -83,7 +83,7 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
       ),
     ).then((result) {
       if (result == true && mounted) {
-        SystemNavigator.pop();
+        killApp();
       }
     });
   }
@@ -180,7 +180,7 @@ class _FloatingGlassBar extends StatelessWidget {
       'Scan',
     ),
     _BarItemData(Icons.history_outlined, Icons.history, 'Logs'),
-    _BarItemData(Icons.import_export_outlined, Icons.import_export, 'Import'),
+    _BarItemData(Icons.settings_outlined, Icons.settings, 'Settings'),
   ];
 
   @override

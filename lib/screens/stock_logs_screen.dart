@@ -197,7 +197,7 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
               : m.date;
           final isAdd = m.type == 'add';
           final isSale = m.type == 'sale';
-          final hasReason = m.reason.isNotEmpty;
+          final badge = _movementBadge(m);
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
             child: ListTile(
@@ -242,50 +242,19 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
-                      color: (isAdd
-                              ? Colors.green
-                              : isSale
-                                  ? Colors.red
-                                  : Colors.orange)
-                          .shade50,
+                      color: badge.$2.shade50,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      isAdd ? 'Add' : isSale ? 'Sale' : 'Remove',
+                      badge.$1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
-                        color: (isAdd
-                                ? Colors.green
-                                : isSale
-                                    ? Colors.red
-                                    : Colors.orange)
-                            .shade700,
+                        color: badge.$2.shade700,
                       ),
                     ),
                   ),
-                  if (hasReason) ...[
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          m.reason,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.orange.shade700,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
                 ],
               ),
               trailing: Column(
@@ -314,6 +283,18 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
         },
       ),
     );
+  }
+
+  /// Returns (label, color) for the movement type badge.
+  (String, MaterialColor) _movementBadge(StockMovement m) {
+    if (m.type == 'add') return ('Restock', Colors.green);
+    if (m.type == 'sale') return ('Sale', Colors.red);
+    if (m.type == 'remove') {
+      if (m.reason.isNotEmpty) return (m.reason, Colors.orange);
+      return ('Removal', Colors.orange);
+    }
+    if (m.reason.isNotEmpty) return (m.reason, Colors.orange);
+    return ('Adjustment', Colors.orange);
   }
 
   Widget _buildPriceList(ThemeData theme) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -14,6 +16,8 @@ class StockLogsScreen extends StatefulWidget {
 
 class _StockLogsScreenState extends State<StockLogsScreen> {
   final _db = DatabaseHelper.instance;
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
   List<StockMovement> _movements = [];
   List<PriceChange> _priceChanges = [];
   bool _loadingMovements = false;
@@ -21,6 +25,9 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
   bool _movementsLoaded = false;
   bool _pricesLoaded = false;
   bool _showPrices = false;
+  String _searchQuery = '';
+  bool _hasMoreMovements = true;
+  static const int _pageSize = 50;
 
   @override
   void initState() {
@@ -28,14 +35,32 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
     _loadMovements();
   }
 
-  Future<void> _loadMovements() async {
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadMovements({bool loadMore = false}) async {
     if (_loadingMovements) return;
     setState(() => _loadingMovements = true);
     try {
-      final movements = await _db.getStockMovements(limit: 200);
+      final offset = loadMore ? _movements.length : 0;
+      final movements = await _db.getStockMovements(
+        limit: _pageSize + 1,
+        offset: offset,
+        search: _searchQuery.isNotEmpty ? _searchQuery : null,
+      );
       if (!mounted) return;
       setState(() {
-        _movements = movements;
+        if (loadMore) {
+          _movements.addAll(movements);
+        } else {
+          _movements = movements;
+        }
+        _hasMoreMovements = movements.length > _pageSize;
+        if (_hasMoreMovements && movements.isNotEmpty) _movements.removeLast();
         _movementsLoaded = true;
         _loadingMovements = false;
       });
@@ -44,7 +69,7 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
     }
   }
 
-  Future<void> _loadPrices() async {
+  Future<void> _loadPrices({bool loadMore = false}) async {
     if (_loadingPrices) return;
     setState(() => _loadingPrices = true);
     try {
@@ -63,6 +88,14 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
         );
       }
     }
+  }
+
+  void _onSearchChanged(String q) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      setState(() => _searchQuery = q);
+      _loadMovements();
+    });
   }
 
   void _onTabChanged(bool showPrices) {
@@ -103,6 +136,22 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
               onSelectionChanged: (v) => _onTabChanged(v.first),
             ),
           ),
+          if (!_showPrices)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Search stock logs...',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                  suffixIcon: _searchCtrl.text.isNotEmpty
+                      ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { _searchCtrl.clear(); _onSearchChanged(''); })
+                      : null,
+                ),
+                onChanged: _onSearchChanged,
+              ),
+            ),
           Expanded(
             child: _showPrices
                 ? _buildPriceList(theme)
@@ -114,19 +163,33 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
   }
 
   Widget _buildStockList(ThemeData theme) {
-    if (_loadingMovements) {
+    if (_loadingMovements && _movements.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_movements.isEmpty) {
       return _emptyState(theme, Icons.inventory_2_outlined,
-          'No stock movements yet', 'Stock changes will appear here');
+          _searchQuery.isNotEmpty ? 'No matching logs' : 'No stock movements yet',
+          _searchQuery.isNotEmpty ? 'Try a different search' : 'Stock changes will appear here');
     }
     return RefreshIndicator(
-      onRefresh: _loadMovements,
+      onRefresh: () => _loadMovements(),
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-        itemCount: _movements.length,
+        itemCount: _movements.length + (_hasMoreMovements ? 1 : 0),
         itemBuilder: (context, index) {
+          if (index == _movements.length) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: _loadingMovements
+                    ? const CircularProgressIndicator()
+                    : TextButton(
+                        onPressed: () => _loadMovements(loadMore: true),
+                        child: const Text('Load more'),
+                      ),
+              ),
+            );
+          }
           final m = _movements[index];
           final date = DateTime.tryParse(m.date);
           final formatted = date != null

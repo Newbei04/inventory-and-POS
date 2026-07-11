@@ -721,12 +721,21 @@ class DatabaseHelper {
     });
   }
 
-  Future<List<StockMovement>> getStockMovements({int? limit}) async {
+  Future<List<StockMovement>> getStockMovements({int? limit, int? offset, String? search}) async {
     final db = await database;
+    String? where;
+    List<dynamic>? whereArgs;
+    if (search != null && search.isNotEmpty) {
+      where = 'product_name LIKE ?';
+      whereArgs = ['%$search%'];
+    }
     final rows = await db.query(
       'stock_movements',
+      where: where,
+      whereArgs: whereArgs,
       orderBy: 'date DESC',
       limit: limit,
+      offset: offset,
     );
     return rows.map((r) => StockMovement.fromMap(r)).toList();
   }

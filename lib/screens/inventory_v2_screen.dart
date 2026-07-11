@@ -53,14 +53,11 @@ class InventoryV2Screen extends StatefulWidget {
 
 class _InventoryV2ScreenState extends State<InventoryV2Screen> {
   final _db = DatabaseHelper.instance;
-  final _scannerController = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-    facing: CameraFacing.back,
-    torchEnabled: false,
-  );
+  late final MobileScannerController _scannerController;
   final _usbScanner = UsbScannerService();
   StreamSubscription<String>? _usbSub;
   final _searchCtrl = TextEditingController();
+  Timer? _debounce;
 
   _ScannerMode _scannerMode = _ScannerMode.camera;
   _CountMode _countMode = _CountMode.add;
@@ -82,11 +79,17 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
   @override
   void initState() {
     super.initState();
+    _scannerController = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      facing: CameraFacing.back,
+      torchEnabled: false,
+    );
     _loadDefaultScanner();
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _usbSub?.cancel();
     _usbScanner.dispose();
     _scannerController.dispose();
@@ -182,11 +185,7 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
       return;
     }
 
-    if (_countMode == _CountMode.add) {
-      _addToCart(product);
-    } else {
-      _addToRemoveCart(product);
-    }
+    _addToCart(product);
 
     Future.delayed(const Duration(seconds: 1), () {
       if (mounted) setState(() => _lastBarcode = null);
@@ -194,6 +193,7 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
   }
 
   void _addToCart(Product product) {
+    final isAdd = _countMode == _CountMode.add;
     final idx = _cartItems.indexWhere((e) => e.product.id == product.id);
     if (idx >= 0) {
       _cartItems[idx].quantity++;
@@ -201,52 +201,37 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
       _cartItems.insert(0, _CartItem(product: product, quantity: 1));
     }
     setState(() {});
+    final qty = _cartItems.firstWhere((e) => e.product.id == product.id).quantity;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${product.name} — qty ${_cartItems.firstWhere((e) => e.product.id == product.id).quantity}'),
+        content: Text(isAdd
+            ? '${product.name} — qty $qty'
+            : '${product.name} — marking $qty for removal'),
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(milliseconds: 600),
-      ),
-    );
-  }
-
-  void _addToRemoveCart(Product product) {
-    final idx = _cartItems.indexWhere((e) => e.product.id == product.id);
-    if (idx >= 0) {
-      _cartItems[idx].quantity++;
-    } else {
-      _cartItems.insert(0, _CartItem(product: product, quantity: 1));
-    }
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${product.name} — marking ${_cartItems.firstWhere((e) => e.product.id == product.id).quantity} for removal'),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: Colors.orange.shade700,
+        backgroundColor: isAdd ? null : Colors.orange.shade700,
         duration: const Duration(milliseconds: 600),
       ),
     );
   }
 
   void _onSearch(String q) {
+    _debounce?.cancel();
     if (q.trim().isEmpty) {
       setState(() { _searchResults = []; _showingSearch = false; });
       return;
     }
     setState(() => _showingSearch = true);
-    _db.getAllProducts(search: q.trim()).then((r) {
-      if (mounted) setState(() => _searchResults = r);
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      _db.getAllProducts(search: q.trim()).then((r) {
+        if (mounted) setState(() => _searchResults = r);
+      });
     });
   }
 
   void _selectSearchProduct(Product p) {
     _searchCtrl.clear();
     setState(() { _searchResults = []; _showingSearch = false; });
-    if (_countMode == _CountMode.add) {
-      _addToCart(p);
-    } else {
-      _addToRemoveCart(p);
-    }
+    _addToCart(p);
   }
 
   void _clearCart() => setState(() => _cartItems.clear());
@@ -254,7 +239,28 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
   Future<void> _applyAll() async {
     if (_cartItems.isEmpty) return;
 
+    if (_countMode == _CountMode.remove) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(Icons.warning_amber_rounded, color: Colors.orange.shade600, size: 36),
+          title: const Text('Remove Stock?'),
+          content: Text('Remove stock for ${_cartItems.length} product(s) with reason "${_selectedReason.label}"?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: Colors.orange.shade700),
+              child: const Text('Remove'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
     int success = 0;
+    int failed = 0;
     for (final item in _cartItems) {
       try {
         if (_countMode == _CountMode.add) {
@@ -264,16 +270,21 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
           await _db.adjustStock(item.product.id!, -clamped, reason: _selectedReason.label, type: 'remove');
         }
         success++;
-      } catch (_) {}
+      } catch (e) {
+        failed++;
+      }
     }
 
     if (!mounted) return;
     final isAdd = _countMode == _CountMode.add;
+    final msg = failed > 0
+        ? '${isAdd ? 'Added' : 'Removed'} $success, failed $failed'
+        : '${isAdd ? 'Added stock for' : 'Removed stock for'} $success product(s)';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(isAdd ? 'Added stock for $success product(s)' : 'Removed stock for $success product(s)'),
+        content: Text(msg),
         behavior: SnackBarBehavior.floating,
-        backgroundColor: isAdd ? Colors.green.shade600 : Colors.orange.shade700,
+        backgroundColor: failed > 0 ? Colors.red.shade600 : (isAdd ? Colors.green.shade600 : Colors.orange.shade700),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -831,7 +842,9 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
                         ),
                       ),
                       title: Text(item.product.name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      subtitle: Text(_selectedReason.label, style: TextStyle(fontSize: 10, color: _selectedReason.color)),
+                      subtitle: isAdd
+                          ? Text('Stock: ${item.product.quantity}', style: TextStyle(fontSize: 10, color: Colors.grey.shade500))
+                          : Text(_selectedReason.label, style: TextStyle(fontSize: 10, color: _selectedReason.color)),
                       trailing: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),

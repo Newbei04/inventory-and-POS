@@ -122,12 +122,6 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
         _onScannerBarcode(barcode);
       }
     });
-    if (mounted) {
-      setState(() {
-        _scannerConnected = _scanner.isConnected;
-        _scannerStatus = _scanner.status;
-      });
-    }
   }
 
   Future<void> _lookup(String barcode) async {
@@ -152,7 +146,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
           : 'No match for that barcode';
     });
 
-    Future.delayed(const Duration(seconds: 5), () {
+    Future.delayed(const Duration(seconds: 8), () {
       if (mounted && _found && _lastBarcode == bc) {
         setState(() {
           _found = false;
@@ -496,6 +490,12 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
           Text(
             'Scan another barcode to continue',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _reset,
+            icon: const Icon(Icons.qr_code_scanner, size: 18),
+            label: const Text('Scan Next'),
           ),
         ],
       ),

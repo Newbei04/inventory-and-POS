@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:price_checker/db/database_helper.dart';
+import 'package:price_checker/utils/scan_beep.dart';
 
 import 'screens/main_shell.dart';
 
@@ -106,6 +107,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<void> _initAndNavigate() async {
     await DatabaseHelper.instance.database;
+    await ScanBeep.init();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const MainShell()),

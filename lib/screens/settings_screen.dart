@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../db/database_helper.dart';
 import '../utils/export_import_helper.dart';
+import '../utils/scan_beep.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -579,6 +580,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // ── Scan Sound ──
+                _card(
+                  icon: Icons.volume_up_outlined,
+                  title: 'Scan Sound',
+                  subtitle: 'Beep on barcode scan',
+                  cs: cs,
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Play beep sound on scan'),
+                    subtitle: Text(
+                      ScanBeep.isEnabled ? 'Enabled' : 'Disabled',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: ScanBeep.isEnabled ? Colors.green.shade700 : Colors.grey.shade500,
+                      ),
+                    ),
+                    secondary: Icon(
+                      ScanBeep.isEnabled ? Icons.volume_up : Icons.volume_off,
+                      color: ScanBeep.isEnabled ? Colors.green : Colors.grey,
+                    ),
+                    value: ScanBeep.isEnabled,
+                    onChanged: (v) async {
+                      await ScanBeep.setEnabled(v);
+                      if (mounted) setState(() {});
+                    },
                   ),
                 ),
               ],

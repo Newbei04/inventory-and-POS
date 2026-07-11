@@ -14,59 +14,32 @@ enum _ScannerMode { camera, external }
 
 enum _CountMode { add, remove }
 
-enum RemoveReason { expired, defective, destroyed, adjustment }
+enum StockReason { adjustment, expired, defective, destroyed }
 
-enum AddReason { restock, returned, transfer, found, adjustment }
-
-extension _RemoveReasonX on RemoveReason {
+extension _StockReasonX on StockReason {
   String get label => switch (this) {
-    RemoveReason.expired => 'Expired',
-    RemoveReason.defective => 'Defective',
-    RemoveReason.destroyed => 'Destroyed',
-    RemoveReason.adjustment => 'Adjustment',
+    StockReason.adjustment => 'Adjustment',
+    StockReason.expired => 'Expired',
+    StockReason.defective => 'Defective',
+    StockReason.destroyed => 'Destroyed',
   };
   IconData get icon => switch (this) {
-    RemoveReason.expired => Icons.event_busy,
-    RemoveReason.defective => Icons.broken_image,
-    RemoveReason.destroyed => Icons.delete_forever,
-    RemoveReason.adjustment => Icons.tune,
+    StockReason.adjustment => Icons.tune,
+    StockReason.expired => Icons.event_busy,
+    StockReason.defective => Icons.broken_image,
+    StockReason.destroyed => Icons.delete_forever,
   };
   Color get color => switch (this) {
-    RemoveReason.expired => Colors.red,
-    RemoveReason.defective => Colors.deepPurple,
-    RemoveReason.destroyed => Colors.brown,
-    RemoveReason.adjustment => Colors.blueGrey,
-  };
-}
-
-extension _AddReasonX on AddReason {
-  String get label => switch (this) {
-    AddReason.restock => 'Restock',
-    AddReason.returned => 'Returned',
-    AddReason.transfer => 'Transfer',
-    AddReason.found => 'Found',
-    AddReason.adjustment => 'Adjustment',
-  };
-  IconData get icon => switch (this) {
-    AddReason.restock => Icons.local_shipping,
-    AddReason.returned => Icons.assignment_return,
-    AddReason.transfer => Icons.swap_horiz,
-    AddReason.found => Icons.search,
-    AddReason.adjustment => Icons.tune,
-  };
-  Color get color => switch (this) {
-    AddReason.restock => Colors.green,
-    AddReason.returned => Colors.teal,
-    AddReason.transfer => Colors.blue,
-    AddReason.found => Colors.indigo,
-    AddReason.adjustment => Colors.blueGrey,
+    StockReason.adjustment => Colors.blueGrey,
+    StockReason.expired => Colors.red,
+    StockReason.defective => Colors.deepPurple,
+    StockReason.destroyed => Colors.brown,
   };
 }
 
 class _CartItem {
   final Product product;
   int quantity;
-  RemoveReason? reason;
 
   _CartItem({required this.product, required this.quantity});
 }
@@ -91,13 +64,14 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
 
   _ScannerMode _scannerMode = _ScannerMode.camera;
   _CountMode _countMode = _CountMode.add;
-  AddReason? _selectedAddReason;
+  StockReason _selectedReason = StockReason.adjustment;
   final List<_CartItem> _cartItems = [];
   bool _torchOn = false;
   bool _usbConnected = false;
   String _usbStatus = 'Disconnected';
   String? _lastBarcode;
   bool _loading = false;
+  bool _scannerHidden = false;
 
   List<Product> _searchResults = [];
   bool _showingSearch = false;
@@ -279,33 +253,15 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
 
   Future<void> _applyAll() async {
     if (_cartItems.isEmpty) return;
-    if (_countMode == _CountMode.add && _selectedAddReason == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a reason before applying'), behavior: SnackBarBehavior.floating),
-      );
-      return;
-    }
-    if (_countMode == _CountMode.remove) {
-      final noReason = _cartItems.where((e) => e.reason == null).toList();
-      if (noReason.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${noReason.length} item(s) missing a removal reason'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-    }
 
     int success = 0;
     for (final item in _cartItems) {
       try {
         if (_countMode == _CountMode.add) {
-          await _db.adjustStock(item.product.id!, item.quantity, reason: _selectedAddReason?.label ?? '', type: 'add');
+          await _db.adjustStock(item.product.id!, item.quantity, reason: 'Restock', type: 'add');
         } else {
           final clamped = item.quantity > item.product.quantity ? item.product.quantity : item.quantity;
-          await _db.adjustStock(item.product.id!, -clamped, reason: item.reason!.label, type: 'remove');
+          await _db.adjustStock(item.product.id!, -clamped, reason: _selectedReason.label, type: 'remove');
         }
         success++;
       } catch (_) {}
@@ -340,7 +296,7 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
               tooltip: 'View Cart',
               onPressed: _showCartSheet,
             ),
-          if (_scannerMode == _ScannerMode.camera) ...[
+          if (_scannerMode == _ScannerMode.camera && !_scannerHidden) ...[
             IconButton(
               icon: const Icon(Icons.flip_camera_android, size: 22),
               tooltip: 'Flip camera',
@@ -353,6 +309,11 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
             ),
           ],
           IconButton(
+            icon: Icon(_scannerHidden ? Icons.visibility_off : Icons.visibility, size: 22),
+            tooltip: _scannerHidden ? 'Show scanner' : 'Hide scanner',
+            onPressed: () => setState(() => _scannerHidden = !_scannerHidden),
+          ),
+          IconButton(
             icon: const Icon(Icons.tune_rounded, size: 22),
             tooltip: 'Scanner settings',
             onPressed: _showScannerModeSheet,
@@ -361,12 +322,15 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
       ),
       body: Column(
         children: [
-          if (_scannerMode == _ScannerMode.camera)
-            _buildCameraSection()
-          else
-            _buildUsbSection(),
+          if (!_scannerHidden) ...[
+            if (_scannerMode == _ScannerMode.camera)
+              _buildCameraSection()
+            else
+              _buildUsbSection(),
+          ],
           _buildModeBar(),
-          if (_countMode == _CountMode.add) _buildAddReasonBar(),
+          if (_countMode == _CountMode.remove) _buildReasonBar(),
+
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
             child: TextField(
@@ -396,8 +360,8 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
             Expanded(
               child: _cartItems.isEmpty ? _buildEmptyState() : _buildCartList(),
             ),
-        ],
-      ),
+          ],
+        ),
       bottomNavigationBar: _buildBottomBar(),
     );
   }
@@ -508,7 +472,7 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
             setState(() { _countMode = _CountMode.add; _cartItems.clear(); });
           })),
           Expanded(child: _modeTab('Remove', Icons.remove, _countMode == _CountMode.remove, Colors.orange, () {
-            setState(() { _countMode = _CountMode.remove; _cartItems.clear(); _selectedAddReason = null; });
+            setState(() { _countMode = _CountMode.remove; _cartItems.clear(); });
           })),
         ],
       ),
@@ -539,32 +503,34 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
     );
   }
 
-  // ── Add reason bar ──
+  // ── Reason bar ──
 
-  Widget _buildAddReasonBar() {
+  Widget _buildReasonBar() {
+    const reasons = [StockReason.expired, StockReason.defective, StockReason.destroyed, StockReason.adjustment];
+
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.green.shade50,
+        color: Colors.orange.shade50,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.green.shade200),
+        border: Border.all(color: Colors.orange.shade200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Reason', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.green.shade700)),
+          Text('Reason', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.orange.shade700)),
           const SizedBox(height: 4),
           Row(
-            children: AddReason.values.map((r) {
-              final sel = _selectedAddReason == r;
+            children: reasons.map((r) {
+              final sel = _selectedReason == r;
               return Expanded(
                 child: GestureDetector(
-                  onTap: () => setState(() => _selectedAddReason = r),
+                  onTap: () => setState(() => _selectedReason = r),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     margin: const EdgeInsets.symmetric(horizontal: 2),
-                    padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 2),
+                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                     decoration: BoxDecoration(
                       color: sel ? r.color.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.6),
                       borderRadius: BorderRadius.circular(6),
@@ -573,9 +539,9 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(r.icon, size: 12, color: sel ? r.color : Colors.grey.shade400),
-                        const SizedBox(height: 1),
-                        Text(r.label, style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600,
+                        Icon(r.icon, size: 14, color: sel ? r.color : Colors.grey.shade400),
+                        const SizedBox(height: 2),
+                        Text(r.label, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600,
                             color: sel ? r.color : Colors.grey.shade500)),
                       ],
                     ),
@@ -697,11 +663,6 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 1),
                   Text('Stock: ${item.product.quantity}', style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
-                  if (!isAdd)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: _removeReasonChip(item),
-                    ),
                 ],
               ),
             ),
@@ -737,81 +698,6 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _removeReasonChip(_CartItem item) {
-    return GestureDetector(
-      onTap: () => _showReasonPickerForItem(item),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-        decoration: BoxDecoration(
-          color: (item.reason?.color ?? Colors.grey).withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(item.reason?.icon ?? Icons.help_outline, size: 10,
-                color: item.reason?.color ?? Colors.grey.shade400),
-            const SizedBox(width: 2),
-            Text(
-              item.reason?.label ?? 'Tap reason',
-              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600,
-                  color: item.reason?.color ?? Colors.grey.shade500),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showReasonPickerForItem(_CartItem item) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Reason for ${item.product.name}', style: const TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 12),
-              Row(
-                children: RemoveReason.values.map((r) {
-                  final sel = item.reason == r;
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () { setState(() => item.reason = r); Navigator.pop(ctx); },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-                        decoration: BoxDecoration(
-                          color: sel ? r.color.withValues(alpha: 0.1) : Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: sel ? r.color.withValues(alpha: 0.4) : Colors.grey.shade200),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(r.icon, size: 18, color: sel ? r.color : Colors.grey.shade400),
-                            const SizedBox(height: 4),
-                            Text(r.label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
-                                color: sel ? r.color : Colors.grey.shade500)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
         ),
       ),
     );
@@ -866,14 +752,12 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
   Widget _buildBottomBar() {
     final isAdd = _countMode == _CountMode.add;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
+      padding: EdgeInsets.fromLTRB(12, 8, 12, MediaQuery.of(context).padding.bottom + 12),
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
       ),
-      child: SafeArea(
-        top: false,
-        child: Row(
+      child: Row(
           children: [
             if (_cartItems.isNotEmpty)
               Expanded(
@@ -902,7 +786,6 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
             ),
           ],
         ),
-      ),
     );
   }
 
@@ -948,9 +831,7 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
                         ),
                       ),
                       title: Text(item.product.name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      subtitle: !isAdd && item.reason != null
-                          ? Text(item.reason!.label, style: TextStyle(fontSize: 10, color: item.reason!.color))
-                          : null,
+                      subtitle: Text(_selectedReason.label, style: TextStyle(fontSize: 10, color: _selectedReason.color)),
                       trailing: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),

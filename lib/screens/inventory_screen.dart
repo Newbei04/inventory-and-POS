@@ -153,7 +153,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     if (qty == null || !mounted) return;
 
     try {
-      await _db.adjustStock(product.id!, qty);
+      await _db.adjustStock(product.id!, qty, reason: 'Restock', type: 'add');
       if (!mounted) return;
       await _load();
       if (mounted) {

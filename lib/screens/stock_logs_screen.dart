@@ -156,24 +156,30 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
                   style: const TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Row(
                 children: [
-                  Text(formatted,
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey.shade600)),
+                  Flexible(
+                    child: Text(formatted,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade600)),
+                  ),
                   if (hasReason) ...[
                     const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade50,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        m.reason,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.orange.shade700,
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          m.reason,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange.shade700,
+                          ),
                         ),
                       ),
                     ),
@@ -281,18 +287,24 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
           child: Text(label,
               style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         ),
-        Text('₱${oldVal.toStringAsFixed(2)}',
-            style: const TextStyle(
-                fontSize: 12, decoration: TextDecoration.lineThrough)),
+        Flexible(
+          child: Text('₱${oldVal.toStringAsFixed(2)}',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 12, decoration: TextDecoration.lineThrough)),
+        ),
         const SizedBox(width: 4),
         Icon(up ? Icons.arrow_upward : Icons.arrow_downward,
             size: 14, color: up ? Colors.red : Colors.green),
         const SizedBox(width: 4),
-        Text('₱${newVal.toStringAsFixed(2)}',
-            style: TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-                color: up ? Colors.red : Colors.green)),
+        Flexible(
+          child: Text('₱${newVal.toStringAsFixed(2)}',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                  color: up ? Colors.red : Colors.green)),
+        ),
       ],
     );
   }

@@ -6,6 +6,25 @@ import 'package:price_checker/screens/settings_screen.dart';
 import 'package:price_checker/screens/price_check_screen.dart';
 import 'package:price_checker/screens/stock_logs_screen.dart';
 
+class TabVisibilityNotifier {
+  final _listeners = <VoidCallback>[];
+  int _currentTabIndex = 0;
+
+  int get currentTabIndex => _currentTabIndex;
+
+  void setCurrentTab(int index) {
+    _currentTabIndex = index;
+    for (final l in _listeners) {
+      l();
+    }
+  }
+
+  void addListener(VoidCallback l) => _listeners.add(l);
+  void removeListener(VoidCallback l) => _listeners.remove(l);
+}
+
+final tabVisibilityNotifier = TabVisibilityNotifier();
+
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -57,6 +76,7 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
       _navigatorKeys[i].currentState?.popUntil((route) => route.isFirst);
       return;
     }
+    tabVisibilityNotifier.setCurrentTab(i);
     _pulseControllers[_currentIndex].reverse();
     setState(() => _currentIndex = i);
     _pulseControllers[i].forward();

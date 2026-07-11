@@ -9,6 +9,7 @@ import '../models/product.dart';
 import '../utils/scan_beep.dart';
 import '../utils/usb_scanner_service.dart';
 import '../widgets/scanner_mode_sheet.dart';
+import 'main_shell.dart';
 
 enum _ScannerMode { camera, external }
 
@@ -51,9 +52,10 @@ class InventoryV2Screen extends StatefulWidget {
   State<InventoryV2Screen> createState() => _InventoryV2ScreenState();
 }
 
-class _InventoryV2ScreenState extends State<InventoryV2Screen> {
+class _InventoryV2ScreenState extends State<InventoryV2Screen>
+    with WidgetsBindingObserver {
   final _db = DatabaseHelper.instance;
-  late final MobileScannerController _scannerController;
+  MobileScannerController? _scannerController;
   final _usbScanner = UsbScannerService();
   StreamSubscription<String>? _usbSub;
   final _searchCtrl = TextEditingController();
@@ -75,10 +77,14 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
 
   int get _totalItems => _cartItems.length;
   int get _totalQty => _cartItems.fold(0, (sum, e) => sum + e.quantity);
+  bool _visible = true;
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    tabVisibilityNotifier.addListener(_onTabChanged);
     _scannerController = MobileScannerController(
       detectionSpeed: DetectionSpeed.noDuplicates,
       facing: CameraFacing.back,
@@ -87,24 +93,55 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
     _loadDefaultScanner();
   }
 
+  void _syncCamera() {
+    if (!mounted || _scannerController == null) return;
+    if (_scannerMode != _ScannerMode.camera) return;
+    if (_visible && _initialized) {
+      _scannerController!.start();
+    } else {
+      _scannerController!.stop();
+    }
+  }
+
+  void _onTabChanged() {
+    final visible = tabVisibilityNotifier.currentTabIndex == 0;
+    if (_visible == visible) return;
+    _visible = visible;
+    _syncCamera();
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    tabVisibilityNotifier.removeListener(_onTabChanged);
     _debounce?.cancel();
     _usbSub?.cancel();
     _usbScanner.dispose();
-    _scannerController.dispose();
+    _scannerController?.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      if (_scannerMode == _ScannerMode.camera) {
+        _scannerController?.stop();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (mounted) _syncCamera();
+    }
   }
 
   Future<void> _loadDefaultScanner() async {
     final mode = await _db.getSetting('default_scan_mode');
     if (!mounted) return;
     final target = mode == 'external' ? _ScannerMode.external : _ScannerMode.camera;
+    _initialized = true;
     if (target != _scannerMode) {
       await _setScannerMode(target);
-    } else if (_scannerMode == _ScannerMode.camera) {
-      _scannerController.start();
+    } else {
+      _syncCamera();
     }
   }
 
@@ -118,9 +155,9 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
     if (mode == _ScannerMode.camera) {
       _usbSub?.cancel();
       _usbScanner.disconnect();
-      await _scannerController.start();
+      _syncCamera();
     } else {
-      await _scannerController.stop();
+      await _scannerController?.stop();
       _startUsbScanner();
     }
   }
@@ -145,9 +182,9 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
     }
   }
 
-  void _flipCamera() => _scannerController.switchCamera();
+  void _flipCamera() => _scannerController?.switchCamera();
   void _toggleTorch() {
-    _scannerController.toggleTorch();
+    _scannerController?.toggleTorch();
     setState(() => _torchOn = !_torchOn);
   }
 
@@ -322,7 +359,16 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
           IconButton(
             icon: Icon(_scannerHidden ? Icons.visibility_off : Icons.visibility, size: 22),
             tooltip: _scannerHidden ? 'Show scanner' : 'Hide scanner',
-            onPressed: () => setState(() => _scannerHidden = !_scannerHidden),
+            onPressed: () {
+              setState(() => _scannerHidden = !_scannerHidden);
+              if (_scannerMode == _ScannerMode.camera) {
+                if (_scannerHidden) {
+                  _scannerController?.stop();
+                } else {
+                  _syncCamera();
+                }
+              }
+            },
           ),
           IconButton(
             icon: const Icon(Icons.tune_rounded, size: 22),
@@ -384,7 +430,8 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen> {
       height: 200,
       child: Stack(
         children: [
-          MobileScanner(controller: _scannerController, onDetect: _onCameraDetect),
+          if (_scannerController != null)
+            MobileScanner(controller: _scannerController!, onDetect: _onCameraDetect),
           Container(
             decoration: BoxDecoration(
               border: Border.all(

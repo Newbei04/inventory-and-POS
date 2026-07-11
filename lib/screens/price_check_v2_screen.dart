@@ -8,6 +8,7 @@ import '../models/product.dart';
 import '../utils/scan_beep.dart';
 import '../utils/usb_scanner_service.dart';
 import '../widgets/scanner_mode_sheet.dart';
+import 'main_shell.dart';
 
 enum _ScannerMode { camera, external }
 
@@ -18,12 +19,9 @@ class PriceCheckV2Screen extends StatefulWidget {
   State<PriceCheckV2Screen> createState() => _PriceCheckV2ScreenState();
 }
 
-class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
-  final _scannerController = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-    facing: CameraFacing.back,
-    torchEnabled: false,
-  );
+class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen>
+    with WidgetsBindingObserver {
+  MobileScannerController? _scannerController;
   final _db = DatabaseHelper.instance;
 
   _ScannerMode _mode = _ScannerMode.camera;
@@ -36,11 +34,37 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
   StreamSubscription<String>? _scannerSub;
   bool _scannerConnected = false;
   String _scannerStatus = 'Disconnected';
+  bool _visible = true;
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    tabVisibilityNotifier.addListener(_onTabChanged);
+    _scannerController = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      facing: CameraFacing.back,
+      torchEnabled: false,
+    );
     _loadDefaultScanner();
+  }
+
+  void _syncCamera() {
+    if (!mounted || _scannerController == null) return;
+    if (_mode != _ScannerMode.camera) return;
+    if (_visible && _initialized) {
+      _scannerController!.start();
+    } else {
+      _scannerController!.stop();
+    }
+  }
+
+  void _onTabChanged() {
+    final visible = tabVisibilityNotifier.currentTabIndex == 0;
+    if (_visible == visible) return;
+    _visible = visible;
+    _syncCamera();
   }
 
   Future<void> _loadDefaultScanner() async {
@@ -49,19 +73,33 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
     final targetMode = mode == 'external'
         ? _ScannerMode.external
         : _ScannerMode.camera;
+    _initialized = true;
     if (targetMode != _mode) {
       await _setMode(targetMode);
-    } else if (_mode == _ScannerMode.camera) {
-      _scannerController.start();
+    } else {
+      _syncCamera();
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    tabVisibilityNotifier.removeListener(_onTabChanged);
     _scannerSub?.cancel();
     _scanner.dispose();
-    _scannerController.dispose();
+    _scannerController?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      if (_mode == _ScannerMode.camera) {
+        _scannerController?.stop();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (mounted) _syncCamera();
+    }
   }
 
   Future<void> _setMode(_ScannerMode mode) async {
@@ -76,20 +114,20 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
     if (mode == _ScannerMode.camera) {
       _scannerSub?.cancel();
       _scanner.disconnect();
-      await _scannerController.start();
+      _syncCamera();
     } else {
-      await _scannerController.stop();
+      await _scannerController?.stop();
       _startScanner();
     }
   }
 
   void _flipCamera() {
-    _scannerController.switchCamera();
+    _scannerController?.switchCamera();
     setState(() {});
   }
 
   void _toggleTorch() {
-    _scannerController.toggleTorch();
+    _scannerController?.toggleTorch();
     setState(() => _torchOn = !_torchOn);
   }
 
@@ -234,10 +272,11 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen> {
       height: 220,
       child: Stack(
         children: [
-          MobileScanner(
-            controller: _scannerController,
-            onDetect: _onDetect,
-          ),
+          if (_scannerController != null)
+            MobileScanner(
+              controller: _scannerController!,
+              onDetect: _onDetect,
+            ),
           Container(
             decoration: BoxDecoration(
               border: Border.all(

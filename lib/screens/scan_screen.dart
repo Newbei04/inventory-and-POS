@@ -174,7 +174,7 @@ class _ScanMethodSheetState extends State<_ScanMethodSheet> {
 }
 
 class _ScanScreenState extends State<ScanScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final MobileScannerController _scannerController = MobileScannerController(
     detectionSpeed: DetectionSpeed.noDuplicates,
     autoStart: false,
@@ -193,6 +193,7 @@ class _ScanScreenState extends State<ScanScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scanMode = widget.initialMode;
     _animCtrl = AnimationController(
       vsync: this,
@@ -355,12 +356,25 @@ class _ScanScreenState extends State<ScanScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scannerSub?.cancel();
     _scanner.dispose();
     _animCtrl.dispose();
     _scannerController.dispose();
     _cameraController?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _scannerController.stop();
+      _cameraController?.dispose();
+      _cameraController = null;
+      _cameraReady = false;
+    } else if (state == AppLifecycleState.resumed) {
+      if (mounted) _startMode(_scanMode);
+    }
   }
 
   static const _bgColor = Color(0xFF0D1117);

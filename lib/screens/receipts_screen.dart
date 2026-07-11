@@ -3,7 +3,8 @@ import 'package:intl/intl.dart';
 
 import '../db/database_helper.dart';
 import '../models/receipt.dart';
-import '../widgets/store_receipt_header.dart';
+import '../widgets/receipts/receipt_refund_dialog.dart';
+import '../widgets/receipts/receipt_view_dialog.dart';
 
 enum ReceiptPeriod { today, week, month, custom, all }
 
@@ -513,331 +514,20 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
   }
 
   void _viewReceipt(Receipt r) {
-    final canAct = r.canModify && DateTime.now().difference(DateTime.parse(r.date)).inHours < 24;
-    final selectedItems = <int>{};
     showDialog(
       context: context,
       useSafeArea: false,
-      builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: StatefulBuilder(
-            builder: (ctx, setDialogState) => Stack(
-              children: [
-                SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(28, 36, 28, 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const StoreReceiptHeader(),
-                        const SizedBox(height: 16),
-                        Text(
-                          'SALE RECEIPT',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                            letterSpacing: 2,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Receipt #${r.receiptNo}',
-                          style: TextStyle(
-                            color: Colors.grey.shade400,
-                            fontSize: 11,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        if (canAct && selectedItems.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.orange.shade200),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.info_outline, size: 16, color: Colors.orange.shade700),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      '${selectedItems.length} item${selectedItems.length == 1 ? '' : 's'} selected for refund',
-                                      style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ...r.items.asMap().entries.map(
-                          (entry) {
-                            final idx = entry.key;
-                            final item = entry.value;
-                            final alreadyRefunded = r.refundedItemIndices.contains(idx);
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: Column(
-                                children: [
-                                  Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      if (canAct && !alreadyRefunded)
-                                        Padding(
-                                          padding: const EdgeInsets.only(right: 8, top: 1),
-                                          child: Checkbox(
-                                            value: selectedItems.contains(idx),
-                                            onChanged: (v) {
-                                              setDialogState(() {
-                                                if (v == true) {
-                                                  selectedItems.add(idx);
-                                                } else {
-                                                  selectedItems.remove(idx);
-                                                }
-                                              });
-                                            },
-                                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                            visualDensity: VisualDensity.compact,
-                                          ),
-                                        ),
-                                      if (alreadyRefunded)
-                                        Padding(
-                                          padding: const EdgeInsets.only(right: 8, top: 2),
-                                          child: Icon(Icons.check_circle, size: 18, color: Colors.orange.shade500),
-                                        ),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Expanded(
-                                                  child: Text(
-                                                    item.productName,
-                                                    style: TextStyle(
-                                                      fontSize: 14,
-                                                      fontWeight: FontWeight.w500,
-                                                      decoration: alreadyRefunded ? TextDecoration.lineThrough : null,
-                                                      color: alreadyRefunded ? Colors.grey : null,
-                                                    ),
-                                                  ),
-                                                ),
-                                                Text(
-                                                  '₱${item.total.toStringAsFixed(2)}',
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.w600,
-                                                    fontSize: 14,
-                                                    decoration: alreadyRefunded ? TextDecoration.lineThrough : null,
-                                                    color: alreadyRefunded ? Colors.grey : null,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              '${item.quantity} × ₱${item.price.toStringAsFixed(2)}${alreadyRefunded ? '  (refunded)' : ''}',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: alreadyRefunded ? Colors.orange.shade500 : Colors.grey.shade500,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        const Divider(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                            Text(
-                              '₱${r.total.toStringAsFixed(2)}',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 20,
-                                decoration: r.isVoided || r.isFullyRefunded ? TextDecoration.lineThrough : null,
-                                color: r.isVoided ? Colors.red : r.isFullyRefunded ? Colors.orange : null,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            '${r.totalItemsQty} total unit${r.totalItemsQty == 1 ? '' : 's'}  ·  ${r.items.length} line${r.items.length == 1 ? '' : 's'}',
-                            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Cash', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                            Text('₱${r.cash.toStringAsFixed(2)}',
-                                style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
-                          ],
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Change', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                            Text(
-                              '₱${r.change.toStringAsFixed(2)}',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: r.change >= 0 ? Colors.green : Colors.red,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          DateFormat('MMM d, yyyy  h:mm a').format(DateTime.parse(r.date)),
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontFamily: 'monospace'),
-                        ),
-                        const SizedBox(height: 20),
-                        if (r.isVoided)
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.red.shade200),
-                            ),
-                            child: Text(
-                              'This receipt has been voided',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.w600),
-                            ),
-                          )
-                        else if (r.isFullyRefunded)
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.shade50,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.orange.shade200),
-                            ),
-                            child: Text(
-                              'This receipt has been fully refunded',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.orange.shade700, fontWeight: FontWeight.w600),
-                            ),
-                          )
-                        else if (canAct) ...[
-                          if (selectedItems.isNotEmpty)
-                            SizedBox(
-                              width: double.infinity,
-                              height: 48,
-                              child: OutlinedButton.icon(
-                                icon: const Icon(Icons.replay, size: 20),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.orange,
-                                  side: BorderSide(color: Colors.orange.shade300),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                                onPressed: () => _confirmRefund(ctx, r, setDialogState, itemIndices: selectedItems.toList()),
-                                label: Text('Refund ${selectedItems.length} Item${selectedItems.length == 1 ? '' : 's'}', style: const TextStyle(fontSize: 15)),
-                              ),
-                            ),
-                          if (selectedItems.isNotEmpty) const SizedBox(height: 10),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 48,
-                            child: OutlinedButton.icon(
-                              icon: const Icon(Icons.cancel_outlined, size: 20),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.red,
-                                side: BorderSide(color: Colors.red.shade300),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              onPressed: () => _confirmVoid(ctx, r, setDialogState),
-                              label: const Text('Void Receipt', style: TextStyle(fontSize: 15)),
-                            ),
-                          ),
-                        ] else
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              'Action window expired (24h limit)',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
-                            ),
-                          ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 48,
-                          child: FilledButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Close', style: TextStyle(fontSize: 15)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (r.isVoided || r.isFullyRefunded)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: Center(
-                        child: Transform.rotate(
-                          angle: -0.5,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: r.isVoided ? Colors.red.shade400 : Colors.orange.shade400,
-                                width: 4,
-                              ),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              r.isVoided ? 'VOID' : 'REFUNDED',
-                              style: TextStyle(
-                                fontSize: 42,
-                                fontWeight: FontWeight.w900,
-                                color: r.isVoided ? Colors.red.shade300 : Colors.orange.shade300,
-                                letterSpacing: 6,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
+      builder: (_) => ReceiptViewDialog(
+        receipt: r,
+        onVoid: () => _confirmVoid(r),
+        onRefund: (indices) => _confirmRefund(r, itemIndices: indices),
       ),
     );
   }
 
-  Future<void> _confirmVoid(BuildContext ctx, Receipt r, StateSetter setDialogState) async {
+  Future<void> _confirmVoid(Receipt r) async {
     final confirm = await showDialog<bool>(
-      context: ctx,
+      context: context,
       builder: (dCtx) => AlertDialog(
         icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 40),
         title: const Text('Void Receipt?'),
@@ -854,10 +544,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
         ],
       ),
     );
-    if (confirm == true && ctx.mounted) {
+    if (confirm == true && mounted) {
       await _db.voidReceipt(r.id!);
-      if (!ctx.mounted) return;
-      Navigator.pop(ctx);
       _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -870,11 +558,11 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
     }
   }
 
-  Future<void> _confirmRefund(BuildContext ctx, Receipt r, StateSetter setDialogState, {List<int>? itemIndices}) async {
+  Future<void> _confirmRefund(Receipt r, {List<int>? itemIndices}) async {
     final isPartial = itemIndices != null && itemIndices.length < r.items.length;
     final count = itemIndices?.length ?? r.items.length;
     final confirm = await showDialog<bool>(
-      context: ctx,
+      context: context,
       builder: (dCtx) => AlertDialog(
         icon: const Icon(Icons.replay, color: Colors.orange, size: 40),
         title: Text(isPartial ? 'Refund $count Item${count == 1 ? '' : 's'}?' : 'Refund Receipt?'),
@@ -893,10 +581,8 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
         ],
       ),
     );
-    if (confirm == true && ctx.mounted) {
+    if (confirm == true && mounted) {
       final inadequate = await _db.refundReceipt(r.id!, itemIndices: itemIndices);
-      if (!ctx.mounted) return;
-      Navigator.pop(ctx);
       _load();
       if (mounted) {
         if (inadequate.isEmpty) {
@@ -961,188 +647,35 @@ class _ReceiptsScreenState extends State<ReceiptsScreen> {
   }
 
   Future<void> _standaloneRefund(Receipt r) async {
-    final selected = <int>{};
-    final qtys = <int, int>{};
-    for (var i = 0; i < r.items.length; i++) {
-      if (!r.refundedItemIndices.contains(i)) {
-        qtys[i] = r.items[i].quantity;
-      }
-    }
-
-    final confirmed = await showDialog<bool>(
+    final itemQuantities = await showDialog<Map<int, int>>(
       context: context,
-      builder: (dCtx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          final totalUnits = selected.fold<int>(0, (s, i) => s + (qtys[i] ?? 0));
-          final totalAmount = selected.fold<double>(0, (s, i) => s + r.items[i].price * (qtys[i] ?? 0));
-          return AlertDialog(
-            title: Row(
-              children: [
-                const Icon(Icons.replay, color: Colors.orange, size: 24),
-                const SizedBox(width: 10),
-                const Expanded(child: Text('Refund Items')),
-              ],
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (selected.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.orange.shade200),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.info_outline, size: 16, color: Colors.orange.shade700),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              '${selected.length} item${selected.length == 1 ? '' : 's'} · $totalUnits unit${totalUnits == 1 ? '' : 's'} · ₱${totalAmount.toStringAsFixed(2)}',
-                              style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  Flexible(
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: r.items.length,
-                      itemBuilder: (_, i) {
-                        final item = r.items[i];
-                        final alreadyRefunded = r.refundedItemIndices.contains(i);
-                        final isSelected = selected.contains(i);
-                        final maxQty = item.quantity;
-                        final currentQty = qtys[i] ?? maxQty;
-                        return Opacity(
-                          opacity: alreadyRefunded ? 0.5 : 1,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              children: [
-                                if (alreadyRefunded)
-                                  Icon(Icons.check_circle, size: 20, color: Colors.orange.shade500)
-                                else
-                                  Checkbox(
-                                    value: isSelected,
-                                    onChanged: (v) {
-                                      setDialogState(() {
-                                        if (v == true) {
-                                          selected.add(i);
-                                          qtys[i] = maxQty;
-                                        } else {
-                                          selected.remove(i);
-                                        }
-                                      });
-                                    },
-                                  ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        item.productName,
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                          decoration: alreadyRefunded ? TextDecoration.lineThrough : null,
-                                          color: alreadyRefunded ? Colors.grey : null,
-                                        ),
-                                      ),
-                                      Text(
-                                        alreadyRefunded ? 'Refunded' : '₱${item.price.toStringAsFixed(2)} × $maxQty',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: alreadyRefunded ? Colors.orange.shade500 : Colors.grey.shade500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (!alreadyRefunded && isSelected) ...[
-                                  IconButton(
-                                    onPressed: currentQty > 1
-                                        ? () => setDialogState(() => qtys[i] = currentQty - 1)
-                                        : null,
-                                    icon: const Icon(Icons.remove_circle_outline, size: 20),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                  ),
-                                  Text(
-                                    '$currentQty',
-                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                                  ),
-                                  IconButton(
-                                    onPressed: currentQty < maxQty
-                                        ? () => setDialogState(() => qtys[i] = currentQty + 1)
-                                        : null,
-                                    icon: const Icon(Icons.add_circle_outline, size: 20),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
-              FilledButton(
-                onPressed: selected.isEmpty
-                    ? null
-                    : () => Navigator.pop(dCtx, true),
-                style: FilledButton.styleFrom(backgroundColor: Colors.orange),
-                child: Text('Refund ${selected.length} Item${selected.length == 1 ? '' : 's'}'),
-              ),
-            ],
-          );
-        },
-      ),
+      builder: (_) => ReceiptRefundDialog(receipt: r),
     );
-
-    if (confirmed == true && mounted) {
-      final itemQuantities = <int, int>{};
-      for (final i in selected) {
-        itemQuantities[i] = qtys[i] ?? r.items[i].quantity;
-      }
-      final inadequate = await _db.refundReceipt(r.id!, itemQuantities: itemQuantities);
-      _load();
-      if (mounted) {
-        if (inadequate.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${selected.length} item(s) refunded — stock deducted'),
-              backgroundColor: Colors.orange.shade700,
-            ),
-          );
-        } else {
-          final names = inadequate.map((i) {
-            final refundedQty = i['refunded'] as int? ?? 0;
-            final sold = i['sold'] as int;
-            if (refundedQty == 0) return '${i['name']} (0/$sold)';
-            return '${i['name']} ($refundedQty/$sold)';
-          }).join(', ');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Partial refund: $names'),
-              backgroundColor: Colors.orange.shade900,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
+    if (itemQuantities == null || !mounted) return;
+    final inadequate = await _db.refundReceipt(r.id!, itemQuantities: itemQuantities);
+    _load();
+    if (mounted) {
+      if (inadequate.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${itemQuantities.length} item(s) refunded — stock deducted'),
+            backgroundColor: Colors.orange.shade700,
+          ),
+        );
+      } else {
+        final names = inadequate.map((i) {
+          final refundedQty = i['refunded'] as int? ?? 0;
+          final sold = i['sold'] as int;
+          if (refundedQty == 0) return '${i['name']} (0/$sold)';
+          return '${i['name']} ($refundedQty/$sold)';
+        }).join(', ');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Partial refund: $names'),
+            backgroundColor: Colors.orange.shade900,
+            duration: const Duration(seconds: 4),
+          ),
+        );
       }
     }
   }

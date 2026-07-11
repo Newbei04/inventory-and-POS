@@ -4,15 +4,16 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 
 import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../models/receipt.dart';
 import '../utils/usb_scanner_service.dart';
 import '../utils/scan_beep.dart';
+import '../widgets/pos/payment_dialog.dart';
+import '../widgets/pos/qty_dialog.dart';
+import '../widgets/pos/receipt_dialog.dart';
 import '../widgets/scanner_mode_sheet.dart';
-import '../widgets/store_receipt_header.dart';
 import 'scan_screen.dart';
 
 class CartItem {
@@ -169,11 +170,13 @@ class _PosScreenState extends State<PosScreen> {
     _promptQtyAndAdd(product);
   }
 
-  /// Show a dialog to pick quantity, then add to cart.
   Future<void> _promptQtyAndAdd(Product product) async {
+    final refs = _cart
+        .map((c) => CartItemRef(product: c.product, quantity: c.quantity))
+        .toList();
     final qty = await showDialog<int>(
       context: context,
-      builder: (ctx) => _QtyDialog(product: product, cart: _cart),
+      builder: (ctx) => QtyDialog(product: product, cart: refs),
     );
     if (qty != null && mounted) {
       _addToCart(product, quantity: qty);
@@ -408,7 +411,7 @@ class _PosScreenState extends State<PosScreen> {
 
     final paid = await showDialog<double>(
       context: context,
-      builder: (_) => _PaymentDialog(total: _total),
+      builder: (_) => PaymentDialog(total: _total),
     );
 
     if (paid == null || !mounted) return;
@@ -506,134 +509,22 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   void _showReceipt(double cash, String receiptNo) {
-    final change = cash - _total;
-    final now = DateTime.now();
-
+    final lines = _cart
+        .map((item) => PosReceiptLine(
+              name: item.product.name,
+              quantity: item.quantity,
+              unitPrice: item.product.price,
+              lineTotal: item.total,
+            ))
+        .toList();
     showDialog(
       context: context,
       useSafeArea: false,
-      builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(28, 36, 28, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const StoreReceiptHeader(),
-                  const SizedBox(height: 16),
-                  Text(
-                    'SALE RECEIPT',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      letterSpacing: 2,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Receipt #$receiptNo',
-                    style: TextStyle(
-                      color: Colors.grey.shade400,
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  ..._cart.map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Column(
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  item.product.name,
-                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                                ),
-                              ),
-                              Text(
-                                '₱${item.total.toStringAsFixed(2)}',
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '${item.quantity} × ₱${item.product.price.toStringAsFixed(2)}',
-                              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const Divider(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'TOTAL',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      Text(
-                        '₱${_total.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 20,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Cash', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                      Text('₱${cash.toStringAsFixed(2)}',
-                          style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
-                    ],
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Change', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                      Text(
-                        '₱${change.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: change >= 0 ? Colors.green : Colors.red,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    DateFormat('MMM d, yyyy  h:mm a').format(now),
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontFamily: 'monospace'),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: FilledButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Done', style: TextStyle(fontSize: 15)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+      builder: (_) => PosReceiptDialog(
+        items: lines,
+        total: _total,
+        cash: cash,
+        receiptNo: receiptNo,
       ),
     );
   }
@@ -1074,228 +965,3 @@ class _PosScreenState extends State<PosScreen> {
   }
 }
 
-/// Dialog for entering cash amount during checkout.
-class _PaymentDialog extends StatefulWidget {
-  final double total;
-  const _PaymentDialog({required this.total});
-
-  @override
-  State<_PaymentDialog> createState() => _PaymentDialogState();
-}
-
-class _PaymentDialogState extends State<_PaymentDialog> {
-  final _ctrl = TextEditingController();
-
-  List<double> get _suggestions {
-    final t = widget.total;
-    return [
-      t,
-      (t + 0.5 - t % 0.5),
-      (t + 1 - t % 1),
-      (t + 5 - t % 5),
-      (t + 10 - t % 10),
-      (t + 20 - t % 20),
-      (t + 50 - t % 50),
-      (t + 100 - t % 100),
-    ]
-        .map((v) => double.parse(v.toStringAsFixed(2)))
-        .toSet()
-        .toList()
-      ..sort();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final total = widget.total;
-    return AlertDialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
-      title: const Row(
-        children: [
-          Icon(Icons.payments, size: 24),
-          SizedBox(width: 8),
-          Text('Payment'),
-        ],
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Total:', style: TextStyle(fontSize: 16)),
-              Text('₱${total.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                  )),
-            ],
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _ctrl,
-            keyboardType: TextInputType.number,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Cash amount',
-              prefixText: '₱ ',
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: _suggestions.map((s) {
-              final isExact = s == total;
-              return ActionChip(
-                label: Text(
-                  isExact ? 'Exact' : '₱${s.toStringAsFixed(0)}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight:
-                        isExact ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-                onPressed: () => _ctrl.text = s.toStringAsFixed(2),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final raw = _ctrl.text.trim();
-            final cash = double.tryParse(raw);
-            if (cash == null || cash <= 0) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Enter a valid amount')),
-              );
-            } else if (cash < total) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'Cash (₱${cash.toStringAsFixed(2)}) is less than total (₱${total.toStringAsFixed(2)})',
-                  ),
-                ),
-              );
-            } else {
-              Navigator.pop(context, cash);
-            }
-          },
-          child: const Text('Pay'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Dialog for picking a quantity before adding to cart.
-class _QtyDialog extends StatefulWidget {
-  final Product product;
-  final List<CartItem> cart;
-  const _QtyDialog({required this.product, required this.cart});
-
-  @override
-  State<_QtyDialog> createState() => _QtyDialogState();
-}
-
-class _QtyDialogState extends State<_QtyDialog> {
-  final _ctrl = TextEditingController(text: '1');
-  String? _error;
-
-  int get _inCart {
-    final i = widget.cart
-        .indexWhere((c) => c.product.id == widget.product.id);
-    return i >= 0 ? widget.cart[i].quantity : 0;
-  }
-
-  int get _available => widget.product.quantity - _inCart;
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final v = int.tryParse(_ctrl.text.trim());
-    if (v == null || v <= 0) {
-      setState(() => _error = 'Enter a whole number greater than 0');
-      return;
-    }
-    if (v > _available) {
-      setState(
-        () => _error = 'Only $_available ${widget.product.unit} available',
-      );
-      return;
-    }
-    Navigator.pop(context, v);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Add ${widget.product.name}'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _ctrl,
-            keyboardType: TextInputType.number,
-            autofocus: true,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-            decoration: InputDecoration(
-              errorText: _error,
-            ),
-            onChanged: (_) {
-              if (_error != null) setState(() => _error = null);
-            },
-            onSubmitted: (_) => _submit(),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'In cart: $_inCart  •  Available: $_available ${widget.product.unit}',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-          ),
-          if (_available <= 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'No stock available',
-                style: TextStyle(
-                    color: theme.colorScheme.error,
-                    fontWeight: FontWeight.w600),
-              ),
-            ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _available > 0 ? _submit : null,
-          child: const Text('Add to cart'),
-        ),
-      ],
-    );
-  }
-}

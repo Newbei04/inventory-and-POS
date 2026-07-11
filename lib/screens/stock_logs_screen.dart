@@ -195,7 +195,8 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
           final formatted = date != null
               ? DateFormat('MMM d, yyyy – h:mm a').format(date)
               : m.date;
-          final isAdd = m.delta >= 0;
+          final isAdd = m.type == 'add';
+          final isSale = m.type == 'sale';
           final hasReason = m.reason.isNotEmpty;
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
@@ -205,14 +206,25 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: (isAdd ? Colors.green : Colors.red).shade50,
+                  color: (isAdd
+                          ? Colors.green
+                          : isSale
+                              ? Colors.red
+                              : Colors.orange)
+                      .shade50,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   isAdd
                       ? Icons.add_circle_outline
-                      : Icons.remove_circle_outline,
-                  color: isAdd ? Colors.green : Colors.red,
+                      : isSale
+                          ? Icons.shopping_cart
+                          : Icons.remove_circle_outline,
+                  color: isAdd
+                      ? Colors.green
+                      : isSale
+                          ? Colors.red
+                          : Colors.orange,
                 ),
               ),
               title: Text(m.productName,
@@ -224,6 +236,33 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             fontSize: 12, color: Colors.grey.shade600)),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: (isAdd
+                              ? Colors.green
+                              : isSale
+                                  ? Colors.red
+                                  : Colors.orange)
+                          .shade50,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      isAdd ? 'Add' : isSale ? 'Sale' : 'Remove',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: (isAdd
+                                ? Colors.green
+                                : isSale
+                                    ? Colors.red
+                                    : Colors.orange)
+                            .shade700,
+                      ),
+                    ),
                   ),
                   if (hasReason) ...[
                     const SizedBox(width: 6),
@@ -258,7 +297,11 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      color: isAdd ? Colors.green : Colors.red,
+                      color: isAdd
+                          ? Colors.green
+                          : isSale
+                              ? Colors.red
+                              : Colors.orange,
                     ),
                   ),
                   Text('→ ${m.newQuantity}',

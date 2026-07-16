@@ -78,7 +78,6 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen>
   int get _totalItems => _cartItems.length;
   int get _totalQty => _cartItems.fold(0, (sum, e) => sum + e.quantity);
   bool _visible = true;
-  bool _initialized = false;
 
   @override
   void initState() {
@@ -96,11 +95,7 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen>
   void _syncCamera() {
     if (!mounted || _scannerController == null) return;
     if (_scannerMode != _ScannerMode.camera) return;
-    if (_visible && _initialized) {
-      _scannerController!.start();
-    } else {
-      _scannerController!.stop();
-    }
+    setState(() {});
   }
 
   void _onTabChanged() {
@@ -124,11 +119,7 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      if (_scannerMode == _ScannerMode.camera) {
-        _scannerController?.stop();
-      }
-    } else if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed) {
       if (mounted) _syncCamera();
     }
   }
@@ -137,7 +128,6 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen>
     final mode = await _db.getSetting('default_scan_mode');
     if (!mounted) return;
     final target = mode == 'external' ? _ScannerMode.external : _ScannerMode.camera;
-    _initialized = true;
     if (target != _scannerMode) {
       await _setScannerMode(target);
     } else {
@@ -430,7 +420,7 @@ class _InventoryV2ScreenState extends State<InventoryV2Screen>
       height: 200,
       child: Stack(
         children: [
-          if (_scannerController != null)
+          if (_scannerController != null && _visible)
             MobileScanner(controller: _scannerController!, onDetect: _onCameraDetect),
           Container(
             decoration: BoxDecoration(

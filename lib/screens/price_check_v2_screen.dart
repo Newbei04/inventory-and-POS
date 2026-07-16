@@ -35,7 +35,6 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen>
   bool _scannerConnected = false;
   String _scannerStatus = 'Disconnected';
   bool _visible = true;
-  bool _initialized = false;
 
   @override
   void initState() {
@@ -53,11 +52,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen>
   void _syncCamera() {
     if (!mounted || _scannerController == null) return;
     if (_mode != _ScannerMode.camera) return;
-    if (_visible && _initialized) {
-      _scannerController!.start();
-    } else {
-      _scannerController!.stop();
-    }
+    setState(() {});
   }
 
   void _onTabChanged() {
@@ -73,7 +68,6 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen>
     final targetMode = mode == 'external'
         ? _ScannerMode.external
         : _ScannerMode.camera;
-    _initialized = true;
     if (targetMode != _mode) {
       await _setMode(targetMode);
     } else {
@@ -93,11 +87,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      if (_mode == _ScannerMode.camera) {
-        _scannerController?.stop();
-      }
-    } else if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed) {
       if (mounted) _syncCamera();
     }
   }
@@ -272,7 +262,7 @@ class _PriceCheckV2ScreenState extends State<PriceCheckV2Screen>
       height: 220,
       child: Stack(
         children: [
-          if (_scannerController != null)
+          if (_scannerController != null && _visible)
             MobileScanner(
               controller: _scannerController!,
               onDetect: _onDetect,
